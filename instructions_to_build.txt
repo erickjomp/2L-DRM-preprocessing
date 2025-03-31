@@ -1,0 +1,4 @@
+Please run:
+fpm build  --link-flag "-L/sw/netcdf4-4.7.4-gnu-9.3.0/lib"
+
+# from here: https://fortran-lang.discourse.group/t/how-to-pass-compiling-and-linking-flags-to-fpm/4404/3

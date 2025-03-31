@@ -1,0 +1,23 @@
+name = "prepro2LDRM-slabvars"
+version = "0.1.0"
+license = "license"
+author = "Jane Doe"
+maintainer = "jane.doe@example.com"
+copyright = "Copyright 2024, Jane Doe"
+[build]
+auto-executables = true
+auto-tests = true
+auto-examples = true
+module-naming = false
+[install]
+library = false
+[fortran]
+implicit-typing = true    #false by default
+implicit-external = true  #false by default
+source-form = "free"
+[dependencies]
+FLAP = { git="https://github.com/szaghi/FLAP.git" }
+mpi = "*"
+netcdf-interfaces = { git = "https://github.com/LKedward/netcdf-interfaces.git" }
+ffilesystem = { git = "https://github.com/scivision/fortran-filesystem.git" } # https://github.com/scivision/fortran-filesystem # dont forget to set envir var FPM_CXXFLAGS
+# other good alternative for getting basenames https://github.com/urbanjost/M_io 
