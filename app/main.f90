@@ -138,9 +138,11 @@ program main
     ! nor using FLAP
 
     ! maybe create a module for this
+    ! call cli%init(help = "ave")
+
     call cli%init(description = 'Program that processes WRF outputs and writes imput binary files for running 2L-DRM. &
                                     &You obtain binary files for: PW, U, V and PWflux. Other variables are written only for &
-                                    & validation purposes.')
+                                    & validation purposes. ',help = "Usage: mpirun [mpirun_optional_arguments]  ")
     call cli%add(switch='--listfiles', &
                  switch_ab='-lf',    &
                  help='Text file containing the list of WRF output files to read. &
