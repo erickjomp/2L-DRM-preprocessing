@@ -37,7 +37,7 @@ In addition, if using a Linux system, you may want to add `~/.local/bin/` to you
 
     export PATH=~/.local/bin/:$PATH
 
-Then you will be able to call the program `run2LDRM` from any directory. For a list of the required and optional inputs of this program, please use:
+Then you will be able to call the program `prepro2LDRM-slabvars` from any directory. For a list of the required and optional inputs of this program, please use:
 
     prepro2LDRM-slabvars --help
 
