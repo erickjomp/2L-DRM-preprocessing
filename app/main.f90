@@ -25,8 +25,10 @@ program main
     character(len=20),dimension(:), allocatable  :: vars_P
     character(len=20)                            :: var_mixing_ratio, var_Uhat, var_Vhat, var_What
     integer                                      :: ncid, status, varid, i, ncid_out
-    real(4), dimension(:,:,:,:), allocatable     :: data_P, data_Uhat, data_Vhat, data_What, data_Q, data_Uhat_stag,&
+    real(4), dimension(:,:,:,:), allocatable     :: data_P, data_Uhat, data_Vhat, data_What, data_Uhat_stag,&
                                                      data_Vhat_stag, data_What_stag
+    real(4), dimension(:,:,:,:), target, allocatable :: data_Q
+    real(4), dimension(:,:,:,:), pointer         :: data_mixingratio                                        
     real(4), dimension(:,:,:,:,:), allocatable   :: data_Pvars
     real(4), dimension(:),allocatable            :: pressure_interslabs   ! in Pa
     real(4), dimension(:,:,:,:), allocatable     :: data_PW, data_U, data_V, data_What_inter, data_Q_inter
@@ -52,6 +54,17 @@ program main
     ! character(99)                                :: string ! String value.
     integer                                      :: error_cli  ! Error trapping flag.
     integer                                      :: rem_file
+
+    real(4), dimension(:,:,:,:), allocatable     :: data_pottemp 
+    real(4), dimension(:,:,:,:), allocatable     :: data_pottemp_inter, data_temp_inter, data_mixingratio_inter, data_density_inter
+    real(4), dimension(:,:,:,:), allocatable     :: data_PWflux, data_PWflux_coarse, data_PWflux_out, data_density_coarse, &
+                                                    data_density_out, data_PWflux_temp
+    character(len=20)                            :: var_PWflux, var_PWflux_extra, var_density, var_perturbation_pottemp ! from PWFLUX program
+    logical                                      :: cum_per_timestep, save_density   ! from PWFLUX program
+    real(4)                                      :: nseconds_in_timestep             ! from PWFLUX program
+    real(4)                                      :: base_state_pottemp               ! from PWFLUX program
+    integer                                      :: i_interslab                      ! from PWFLUX program
+    real(4)                                      :: Rd, kappa, P0                    ! from PWFLUX program
 
 
     call cpu_time(startTime)
@@ -94,8 +107,24 @@ program main
 
 
     vars_out_names = (/"PW","U ","V ","W ","Q "/)
-
     var_PW_extra = "PW24"  ! only in case  extra_time_factor_PW  is not time_factor
+
+
+    !############################################################################################################!
+    !#######################################  from PWFLUX program ###############################################!
+    !############################################################################################################!
+    var_perturbation_pottemp = "T"       ! in K
+    base_state_pottemp = 300     ! https://www2.mmm.ucar.edu/wrf/users/wrf_users_guide/build/html/output.html
+
+    var_PWflux = "PWflux"
+    var_PWflux_extra = "PWflux24"
+    cum_per_timestep = .true.
+    nseconds_in_timestep = 60*60  ! number of seconds per timestep in input data
+    save_density = .true.
+    var_density = "moistdensity"
+    !############################################################################################################!
+    !##################################### END from PWFLUX program ##############################################!
+    !############################################################################################################!
 
 
 
@@ -208,10 +237,10 @@ program main
 
     call cli%add(switch='--pressurelevels', &
         switch_ab='-pl',    &
-        help='Pressure levels to interpolate to (nslanbs -1 pressure levels)',   &
-        required=.false.,   &
+        help='Pressure levels to interpolate to (nslanbs -1 pressure levels) in Pa',   &
+        required=.true.,   &
         act='store',       &
-        def="700",          &
+        ! def="70000",          &
         nargs="+", &
         error=error_cli)
     if (error_cli/=0) stop
@@ -316,10 +345,12 @@ program main
     allocate(data_Vhat(nx,ny,nz,nt))
     allocate(data_What(nx,ny,nz,nt))
     allocate(data_Q(nx,ny,nz,nt))
+    allocate(data_pottemp(nx,ny,nz,nt)) ! from PWFLUX program
 
     allocate(data_U(nx,ny,nslabs,nt))
     allocate(data_V(nx,ny,nslabs,nt))
     allocate(data_PW(nx,ny,nslabs,nt))
+    ! interpolated data (interslabs) 
     allocate(data_Q_inter(nx,ny,nslabs-1,nt))
     allocate(data_What_inter(nx,ny,nslabs-1,nt))
 
@@ -335,7 +366,28 @@ program main
     allocate(data_PW_out(nx_coarse, ny_coarse, nslabs, 1)) 
     allocate(data_Q_out(nx_coarse, ny_coarse, nslabs-1,1)) 
     allocate(data_What_out(nx_coarse, ny_coarse, nslabs-1,1))  
+    !############################################################################################################!
+    !#######################################  from PWFLUX program ###############################################!
+    !############################################################################################################!
+    ! interpolated data (interslabs) 
+    allocate(data_pottemp_inter(nx,ny,nslabs-1,nt))      ! from PWFLUX program
+    allocate(data_temp_inter(nx,ny,nslabs-1,nt))         ! from PWFLUX program
+    allocate(data_mixingratio_inter(nx,ny,nslabs-1,nt))  ! from PWFLUX program
+    ! allocate(data_What_inter(nx,ny,nslabs-1,nt))       ! from PWFLUX program
+    allocate(data_PWflux(nx,ny,nslabs-1,nt))             ! from PWFLUX program
+    allocate(data_density_inter(nx,ny,nslabs-1,nt))      ! from PWFLUX program
+    ! for ouput
+    allocate(data_PWflux_coarse(nx_coarse, ny_coarse, nslabs-1,time_factor))     
+    allocate(data_PWflux_out(nx_coarse, ny_coarse, nslabs-1,1)) 
+    if (save_density) then
+        allocate(data_density_coarse(nx_coarse, ny_coarse, nslabs-1,time_factor))     
+        allocate(data_density_out(nx_coarse, ny_coarse, nslabs-1,1)) 
+    end if
+    !############################################################################################################!
+    !##################################### END from PWFLUX program ##############################################!
+    !############################################################################################################!
 
+    
     counter_chunk = 1
     n_chunks_max = ceiling(n_all_chunks*1.0/size_Of_Cluster)
     n_chunks_last_processor = mod(n_all_chunks-1,n_chunks_max) +1  ! -1 and +1 to account for the case when mod would be 0
@@ -357,8 +409,22 @@ program main
     open(15,  file = trim(path_outputs) // "tempdata_" //trim(basename) //"_"  // trim(vars_out_names(5)) // & 
                     "_proc" // str(process_Rank), &
                     status='REPLACE', access='stream')
-    ! read(10) PW
-    ! close(10)
+    
+    !############################################################################################################!
+    !#######################################  from PWFLUX program ###############################################!
+    !############################################################################################################!
+    open(21,  file = trim(path_outputs) // "tempdata_" //trim(basename) //"_"  // trim(var_PWflux) // &
+    "_proc" // str(process_Rank), & 
+    status='REPLACE', access='stream')
+    if (save_density) then
+        open(22,  file = trim(path_outputs) // "tempdata_" //trim(basename) //"_"  // trim(var_density) // &
+        "_proc" // str(process_Rank), status='REPLACE', access='stream')
+    end if
+    !############################################################################################################!
+    !##################################### END from PWFLUX program ##############################################!
+    !############################################################################################################!
+
+
 
     allocate(n_chunks(size_Of_Cluster))
     n_chunks = n_all_chunks / size_Of_Cluster
@@ -420,8 +486,11 @@ program main
             status = nf90_inq_varid(ncid,var_mixing_ratio,varid)
             status = nf90_get_var(ncid,varid,data_Q)   ! actually is mixing ratio, but will be transformed to specific humidity Q
             ! data_Q = data_Q / (1+data_Q) ! transforming mixing ratio to Q (specific_humidity)
+            data_mixingratio => data_Q
 
-            
+            status = nf90_inq_varid(ncid,var_perturbation_pottemp,varid)       ! from PWFLUX program
+            status = nf90_get_var(ncid,varid,data_pottemp)                     ! from PWFLUX program
+            data_pottemp = data_pottemp + base_state_pottemp                   ! from PWFLUX program
 
             status = nf90_close(ncid)
 
@@ -429,14 +498,69 @@ program main
             call destagger(data_Uhat_stag, data_Uhat, nx, ny, nz, nt, 1)
             call destagger(data_Vhat_stag, data_Vhat, nx, ny, nz, nt, 2)
             call destagger(data_What_stag, data_What, nx, ny, nz, nt, 3)
-            data_Q = data_Q / (1+data_Q) ! transforming mixing ratio to Q (specific_humidity)
+
+    !############################################################################################################!
+    !#######################################  from PWFLUX program ###############################################!
+    !############################################################################################################!
+            ! interpolating to interslabs
+            call DINTERP3DZ(data_mixingratio, data_mixingratio_inter, data_P, pressure_interslabs, nx, ny, nz, nslabs-1, &
+                        ieee_value(pressure_interslabs(1), ieee_quiet_nan))
+            call DINTERP3DZ(data_What, data_What_inter, data_P, pressure_interslabs, nx, ny, nz, nslabs-1, &
+                        ieee_value(pressure_interslabs(1), ieee_quiet_nan))
+            call DINTERP3DZ(data_pottemp, data_pottemp_inter, data_P, pressure_interslabs, nx, ny, nz, nslabs-1, &
+                        ieee_value(pressure_interslabs(1), ieee_quiet_nan))
+
+            kappa = 0.286   ! Rd/Cp  ! https://en.wikipedia.org/wiki/Potential_temperature  
+            P0 = 100000.0 ! Pascales
+            ! https://unidata.github.io/MetPy/latest/api/generated/metpy.calc.potential_temperature.html
+            ! data_temp = data_pottemp * (data_P / P0)**kappa
+
+            ! transfort
+
+            Rd = 287.052874
+            ! eq 14 from http://www.atmo.arizona.edu/students/courselinks/fall11/atmo551a/ATMO_451a_551a_files/GasLawHydrostatic.pdf
+            ! https://unidata.github.io/MetPy/latest/api/generated/metpy.calc.density.html
+            ! data_density = 0.622 * data_P * (1 + data_mixingratio) / (Rd * data_temp * (data_mixingratio + 0.622))
+            do i_interslab = 1, nslabs-1
+                data_temp_inter(:,:,i_interslab,:) = data_pottemp_inter(:,:,i_interslab,:) * &
+                                                        (pressure_interslabs(i_interslab) / P0)** kappa
+                data_density_inter(:,:,i_interslab,:) = &
+                        0.622 * pressure_interslabs(i_interslab) * &
+                        (1 + data_mixingratio_inter(:,:,i_interslab,:)) / &
+                        (Rd * data_temp_inter(:,:,i_interslab,:) * (data_mixingratio_inter(:,:,i_interslab,:) + 0.622))
+            end do
+
+            ! data_PWflux = data_Q * data_density * data_What
+            data_PWflux = (data_mixingratio_inter  / (1+data_mixingratio_inter))  * data_density_inter * data_What_inter
+
+            if (coarse_factor > 1) then              
+                call coarsen_xy_grid(data_PWflux,  data_PWflux_coarse(:,:,:,1+nt*(i_file-1):nt*i_file),   &
+                                    nx, ny, nslabs-1, nt, coarse_factor)    
+                if (save_density) then
+                    call coarsen_xy_grid(data_density_inter,  data_density_coarse(:,:,:,1+nt*(i_file-1):nt*i_file),   &
+                                    nx, ny, nslabs-1, nt, coarse_factor)  
+                end if
+            else
+                data_PWflux_coarse(:,:,:,1+nt*(i_file-1):nt*i_file) = data_PWflux
+                if (save_density) then
+                    data_density_coarse(:,:,:,1+nt*(i_file-1):nt*i_file) = data_density_inter
+                end if
+            end if
+    !############################################################################################################!
+    !##################################### END from PWFLUX program ##############################################!
+    !############################################################################################################!
+
+
+
+
+            data_Q = data_mixingratio / (1+data_mixingratio) ! transforming mixing ratio to Q (specific_humidity)
             ! print *, "P(100,50,1,1) = ", data_P(100,50,1,1)
 
             ! calculate_slabs should be improved for the case when two or more pressure levels fall between two presure values of the data
             call calculate_slabs(data_Uhat, data_Vhat, data_Q, data_P, pressure_interslabs, nx, ny, nz, nslabs, nt, data_PW, &
                                     data_U, data_V, data_Q_inter)
-            call DINTERP3DZ(data_What, data_What_inter, data_P, pressure_interslabs, nx, ny, nz, nslabs-1, &
-                                    ieee_value(pressure_interslabs(1), ieee_quiet_nan))
+            ! call DINTERP3DZ(data_What, data_What_inter, data_P, pressure_interslabs, nx, ny, nz, nslabs-1, &
+            !                         ieee_value(pressure_interslabs(1), ieee_quiet_nan))
 
             if (coarse_factor > 1) then              
                 call coarsen_xy_grid(data_U,          data_U_coarse(:,:,:,1+nt*(i_file-1):nt*i_file),   nx, ny, nslabs,   &
@@ -471,21 +595,19 @@ program main
         write(14) data_What_out 
         write(15) data_Q_out 
 
-        ! file_output = trim(path_outputs) // trim(basename) // "_" //  trim(vars_out_names(1)) // ".nc"
-        ! status = nf90_create(file_output, 0, ncid_out)
-        ! status = nf90_def_dim(ncid_out, "x", nx_coarse, ncdf_dim1_id)
-        ! status = nf90_def_dim(ncid_out, "y", ny_coarse, ncdf_dim2_id)
-        ! status = nf90_def_dim(ncid_out, "slab", nslabs, ncdf_dim3_id)
-        ! status = nf90_def_dim(ncid_out, "time", nf90_unlimited, ncdf_dim4_id)
-        ! if (sizeof(data_PW(1,1,1,1)) == 4) then
-        !     status = nf90_def_dim(ncid_out,vars_out_names(1), NF90_FLOAT,
-        !                             (/ncdf_dim1_id, ncdf_dim2_id, ncdf_dim3_id, ncdf_dim4_id/), ncdf_varout_id)
-        ! else if (sizeof(data_PW(1,1,1,1)) == 8) then
-        !     status = nf90_def_dim(ncid_out,vars_out_names(1), NF90_DOUBLE,&
-        !                             (/ncdf_dim1_id, ncdf_dim2_id, ncdf_dim3_id, ncdf_dim4_id/), ncdf_varout_id)
-        ! end if  
-        ! status = nf90_put_var(ncid_out, ncdf_varout_id, data_PW_out, (/1,1,1,i_chunk/))
+    !############################################################################################################!
+    !#######################################  from PWFLUX program ###############################################!
+    !############################################################################################################!
+        data_PWflux_out(:,:,:,1) = sum(data_PWflux_coarse,dim = 4)/time_factor
+        write(21) data_PWflux_out 
 
+        if (save_density) then
+            data_density_out(:,:,:,1)  = sum(data_density_coarse,dim = 4)/time_factor
+            write(22)   data_density_out
+        end if
+    !############################################################################################################!
+    !##################################### END from PWFLUX program ##############################################!
+    !############################################################################################################!
 
 
     end do
@@ -495,6 +617,8 @@ program main
     close(13)
     close(14)
     close(15)
+    close(21)  ! from PWFLUX program
+    close(22)  ! from PWFLUX program
 
     ! CLOSING raw data to store
     deallocate(data_Pvars)
@@ -523,7 +647,28 @@ program main
     deallocate(data_PW_coarse) 
     deallocate(data_Q_coarse) 
     deallocate(data_What_coarse)  
+
+    !############################################################################################################!
+    !#######################################  from PWFLUX program ###############################################!
+    !############################################################################################################!
+    deallocate(data_pottemp)
+        
+    ! ! interpolated data (interslabs)
+    deallocate(data_pottemp_inter)
+    deallocate(data_temp_inter)
+    ! deallocate(data_mixingratio_intZer)
+    ! deallocate(data_What_inter)  
+    deallocate(data_PWflux)
+    deallocate(data_PWflux_coarse)  
+    ! deallocate(data_PWflux_out)
     
+    if (save_density) then
+        deallocate(data_density_coarse)
+    end if
+    !############################################################################################################!
+    !##################################### END from PWFLUX program ##############################################!
+    !############################################################################################################!
+
 
     deallocate(files_chunk)
 
@@ -536,8 +681,17 @@ program main
             if (time_factor_extra > 1) then
                 i_extra = 1
                 allocate(data_PW_temp(nx_coarse, ny_coarse, nslabs, time_factor_extra))
-                open(201,  file = trim(path_outputs) // trim(basename) //"_" // trim(var_PW_extra) //".dat", &
+                open(211,  file = trim(path_outputs) // trim(basename) //"_" // trim(var_PW_extra) //".dat", &
                                 status='REPLACE', action="write", access='stream')
+    !############################################################################################################!
+    !#######################################  from PWFLUX program ###############################################!
+    !############################################################################################################!
+                allocate(data_PWflux_temp(nx_coarse, ny_coarse, nslabs-1, time_factor_extra))
+                open(221,  file = trim(path_outputs) // trim(basename) //"_" // trim(var_PWflux_extra) //".dat", &
+                                status='REPLACE', action="write", access='stream')
+    !############################################################################################################!
+    !##################################### END from PWFLUX program ##############################################!
+    !############################################################################################################!
             end if
         else
             print *, "extra_time_factor_PW must be a multiple of time_factor"
@@ -545,17 +699,28 @@ program main
         end if
         ! END for extra time aggragation PW
 
-        open(101,file = trim(path_outputs) // trim(basename) //"_" // trim(vars_out_names(1)) //".dat", &
+        open(111,file = trim(path_outputs) // trim(basename) //"_" // trim(vars_out_names(1)) //".dat", &
                 status = "REPLACE", action = "write", access='stream')
-        open(102,file = trim(path_outputs) // trim(basename) //"_" // trim(vars_out_names(2)) //".dat", &
+        open(112,file = trim(path_outputs) // trim(basename) //"_" // trim(vars_out_names(2)) //".dat", &
                 status = "REPLACE", action = "write", access='stream')
-        open(103,file = trim(path_outputs) // trim(basename) //"_" // trim(vars_out_names(3)) //".dat", & 
+        open(113,file = trim(path_outputs) // trim(basename) //"_" // trim(vars_out_names(3)) //".dat", & 
                 status = "REPLACE", action = "write", access='stream')
-        open(104,file = trim(path_outputs) // trim(basename) //"_" // trim(vars_out_names(4)) //".dat", & 
+        open(114,file = trim(path_outputs) // trim(basename) //"_" // trim(vars_out_names(4)) //".dat", & 
                 status = "REPLACE", action = "write", access='stream')
-        open(105,file = trim(path_outputs) // trim(basename) //"_" // trim(vars_out_names(5)) //".dat", & 
+        open(115,file = trim(path_outputs) // trim(basename) //"_" // trim(vars_out_names(5)) //".dat", & 
                 status = "REPLACE", action = "write", access='stream')
-
+    !############################################################################################################!
+    !#######################################  from PWFLUX program ###############################################!
+    !############################################################################################################!
+        open(121,file = trim(path_outputs) // trim(basename) //"_" // trim(var_PWflux) //".dat", &
+                status = "REPLACE", action = "write", access='stream')
+        if (save_density) then
+            open(122,file = trim(path_outputs) // trim(basename) //"_" // trim(var_density) //".dat", &
+                status = "REPLACE", action = "write", access='stream')
+        end if
+    !############################################################################################################!
+    !##################################### END from PWFLUX program ##############################################!
+    !############################################################################################################!
         do i_proc = 0,(size_Of_Cluster-1)
             write (*, "('Reading results of processor ',I0, ' and writing to final files')") i_proc
             open(11,  file = trim(path_outputs) // "tempdata_" //trim(basename) //"_" // trim(vars_out_names(1)) // "_proc" // & 
@@ -573,8 +738,21 @@ program main
             open(15,  file = trim(path_outputs) // "tempdata_" //trim(basename) //"_" // trim(vars_out_names(5)) // "_proc" // &
                     str(i_proc), & 
                     status='OLD', action="read", access='stream')
-
-
+    !############################################################################################################!
+    !#######################################  from PWFLUX program ###############################################!
+    !############################################################################################################!
+            open(21,  file = trim(path_outputs) // "tempdata_" //trim(basename) //"_" // trim(var_PWflux) // "_proc" // & 
+                    str(i_proc), & 
+                    status='OLD', action="read", access='stream')
+            if (save_density) then
+                open(22,  file = trim(path_outputs) // "tempdata_" //trim(basename) //"_" // trim(var_density) // "_proc" // & 
+                    str(i_proc), & 
+                    status='OLD', action="read", access='stream')
+            end if
+    !############################################################################################################!
+    !##################################### END from PWFLUX program ##############################################!
+    !############################################################################################################!
+            
             ! n_chunks = n_chunks_max
             ! if (i_proc == (size_Of_Cluster-1))    n_chunks = n_chunks_last_processor
                 
@@ -585,22 +763,50 @@ program main
                 read(14)   data_What_out
                 read(15)   data_Q_out
 
-                write(101)   data_PW_out
-                write(102)   data_U_out
-                write(103)   data_V_out
-                write(104)   data_What_out
-                write(105)   data_Q_out
+                write(111)   data_PW_out
+                write(112)   data_U_out
+                write(113)   data_V_out
+                write(114)   data_What_out
+                write(115)   data_Q_out
 
+    !############################################################################################################!
+    !#######################################  from PWFLUX program ###############################################!
+    !############################################################################################################!
+                read(21)   data_PWflux_out
+                
+                if (.not. cum_per_timestep)  write(121)   data_PWflux_out
+                if (cum_per_timestep)    write(121) data_PWflux_out * (time_factor * nseconds_in_timestep)  
+
+                if (save_density) then
+                    read(22) data_density_out
+                    write(122) data_density_out
+                end if
+    !############################################################################################################!
+    !##################################### END from PWFLUX program ##############################################!
+    !############################################################################################################!
                 ! for extra time aggragation PW
                 if (time_factor_extra > 1) then
                     data_PW_temp(:,:,:,i_extra) = data_PW_out(:,:,:,1)
+                    data_PWflux_temp(:,:,:,i_extra) = data_PWflux_out(:,:,:,1) ! from PWFLUX program
                     if (i_extra == time_factor_extra) then
-                        write(201)  sum(data_PW_temp,dim = 4) / time_factor_extra
+                        write(211)  sum(data_PW_temp,dim = 4) / time_factor_extra
+    !############################################################################################################!
+    !#######################################  from PWFLUX program ###############################################!
+    !############################################################################################################!                     
+                        if (.not. cum_per_timestep)   write(221)  sum(data_PWflux_temp,dim = 4) / time_factor_extra
+                        if (cum_per_timestep)  then
+                              write(221) sum(data_PWflux_temp * (time_factor * nseconds_in_timestep) ,dim = 4)  
+                        end if
+    !############################################################################################################!
+    !##################################### END from PWFLUX program ##############################################!
+    !############################################################################################################!
                         i_extra = 0
                     end if
                     i_extra = i_extra + 1
                 end if
                 ! END for extra time aggragation PW  
+
+
             end do
 
 
@@ -612,14 +818,17 @@ program main
             close(15, status = "delete")
         end do
 
-        close(101)
-        close(102)
-        close(103)
-        close(104)
-        close(105)
+        close(111)
+        close(112)
+        close(113)
+        close(114)
+        close(115)
+        close(121)                           ! from PWFLUX program
+        if (save_density)   close(122)       ! from PWFLUX program
 
         if (time_factor_extra > 1) then
-            close(201)
+            close(211)
+            close(221)                       ! from PWFLUX program 
         end if
     end if
 
