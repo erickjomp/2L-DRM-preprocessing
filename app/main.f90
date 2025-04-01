@@ -196,7 +196,7 @@ program main
     call cli%add(switch='--remfile', &
         switch_ab='-rf',    &
         help='By default the program expects the list of files to have [n x timefactor + 1] files, where n is an integer. &
-            &(i.e. the first  and las file have time 00:00:00). &
+            &(i.e. the first  and last file have time 00:00:00). &
             &Then the program ignores the last file so it process  [n x timefactor] files. &
             &If you prefer to ignore the first file instead, use option 1. &
             &If the number number of files in the list of files is actually [n x timefactor], use option 0.',    &   

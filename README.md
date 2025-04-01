@@ -28,7 +28,7 @@ And you can build the 2L-DRM program using:
 
 If this does not work, probably you will have to manually specify some linking flags. For instance this worked for me: `fpm build  --link-flag "-L/sw/netcdf4-4.7.4-gnu-9.3.0/lib`
 
-And install it using:
+And install it using (you may also have to add the same linkign flags as in `fpm build`):
 
     fpm install
 
