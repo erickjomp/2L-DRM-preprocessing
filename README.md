@@ -1,7 +1,7 @@
 # prepro2LDRM-slabvars 
 
 
-This repository contains the CLI preprocessing program for the 2L-DRM model. This program takes WRF files (wrfout files) as inputs and writes  binary files that will be the inputs of the 2LDRM model. You obtain binary files for: PW, U, V and PWflux. Other variables are written only for validation purposes. 
+This repository contains the CLI preprocessing program for the 2L-DRM model. This program takes WRF files (wrfout files) as inputs and writes  binary files that will be the inputs of the 2LDRM model. You obtain binary files for: PW (precipitable water), U (moisture weighted u wind-speed), V (moisture weighted v wind-speed) and PWflux (PW vertical flux between slabs). Other variables are written only for validation purposes. 
 
 The generated binary files have dimensions (nx, ny, nslabs, ntimesteps), with the exception of PWflux which has dimensions (nx, ny, nslabs-1, ntimesteps) since it is calcualted at the interface between slabs. The binary files are stored in Fortran-memory order (see Notes below).
 
@@ -45,7 +45,7 @@ Then you will be able to call the program `prepro2LDRM-slabvars` from any direct
 ## Notes
 - The data in the generated  binary files is in Fortran-like memory order (read more about it here https://manik.cc/2021/02/25/memory-order.html). As a rule of thumb, when reading the binary files  as arrays in python, you should reshape it to dimensions (ntimes, nslabs, ny, nx), except PWflux which has to be reshaped to (ntimes, nslabs-1, ny, nx).
 
-- The precipitable water flux at the interslab (PWflux) is calculated by $\rho_{air} w_{wind} q$, where $\rho_{air}$ is the density of the air, $w_{wind}$ is the vertical wind velocity and $q$ is the specific humidity at the interslab pressure level.
+- The precipitable water flux between slabs (PWflux) is calculated by $\rho_{air} w_{wind} q$, where $\rho_{air}$ is the density of the air, $w_{wind}$ is the vertical wind velocity and $q$ is the specific humidity at the interslab pressure level.
 
 ## Additional binary files required by 2L-DRM
 - Precipitation (PP) and Evapotranspiration can be calculated using the python programs in the folder `other_programs/PP-ET_programs`. To know the arguments required by those programs, please use `python ET_preprocessing_2LDRM.py --help` or  `python PP_preprocessing_2LDRM_fromRAINNC-C.py --help` .
