@@ -139,10 +139,13 @@ program main
 
     ! maybe create a module for this
     call cli%init(description = 'Program that processes WRF outputs and writes imput binary files for running 2L-DRM. &
-                                    &You obatain binary files for: PW, etc')
+                                    &You obtain binary files for: PW, U, V and PWflux. Other variables are written only for &
+                                    & validation purposes.')
     call cli%add(switch='--listfiles', &
                  switch_ab='-lf',    &
-                 help='Text file containing the list of WRF output files to read',   &
+                 help='Text file containing the list of WRF output files to read. &
+                    &The number of files should be [n x timefactor + 1], where n is an integer. &
+                    &For other options see the --remfile option. ',   &
                  required=.true.,   &
                  act='store',       &
                  error=error_cli)
@@ -161,7 +164,8 @@ program main
 
     call cli%add(switch='--timefactor', &
                  switch_ab='-tf',    &
-                 help='time factor to which the variables will be calculated',   &
+                 help='time factor used for time coarsening. &
+                      &Each timefactor files in the input files become one time step in the outputs. ',   &
                  required=.true.,   &
                  act='store',       &
                  error=error_cli)
@@ -170,7 +174,8 @@ program main
 
     call cli%add(switch='--extratimefactor', &
         switch_ab='-etf',    &
-        help='extra time factor to which precipitable water (PW) will be calculated',   &
+        help='extra time factor to which precipitable water (PW) and PW flux (PWflux) will be calculated. &
+              &If the input data is hourly, this will normally be 24.',   &
         required=.true.,   &
         act='store',       &
         error=error_cli)
@@ -179,7 +184,7 @@ program main
 
     call cli%add(switch='--coarse_factor', &
         switch_ab='-cf',    &
-        help='coarsening factor',   &
+        help='Spatial coarsening factor. The default is 1 (no coarsening).',   &
         required=.false.,   &
         act='store',       &
         def="1",          &
@@ -188,12 +193,14 @@ program main
 
     call cli%add(switch='--remfile', &
         switch_ab='-rf',    &
-        help='Should be 0, 1 or 2. sometime the number of files is a multiple of timefactor + 1, because the list of files &
-                &start with 00:00:00 and ends with 00:00:00. Since the number of files must be a multiple of timefactor, &
-                & this options allows to remove the first file (enter 1) or the last file (enter 2) ',   &
+        help='By default the program expects the list of files to have [n x timefactor + 1] files, where n is an integer. &
+            &(i.e. the first  and las file have time 00:00:00). &
+            &Then the program ignores the last file so it process  [n x timefactor] files. &
+            &If you prefer to ignore the first file instead, use option 1. &
+            &If the number number of files in the list of files is actually [n x timefactor], use option 0.',    &   
         required=.false.,   &
         act='store',       &
-        def="0",          &
+        def="2",          &
         error=error_cli)
     if (error_cli/=0) stop
 
@@ -218,7 +225,7 @@ program main
 
     call cli%add(switch='--nz', &
         switch_ab='-nz',    &
-        help='Number of grid cells in the vertical',   &
+        help='Number of grid cells in the vertical direction',   &
         required=.true.,   &
         act='store',       &
         ! def="1",          &
@@ -228,7 +235,7 @@ program main
 
     call cli%add(switch='--nslabs', &
         switch_ab='-ns',    &
-        help='Number of slabs to interpolate to',   &
+        help='Number of slabs to interpolate to. By default it is 2.',   &
         required=.false.,   &
         act='store',       &
         def="2",          &
@@ -237,7 +244,7 @@ program main
 
     call cli%add(switch='--pressurelevels', &
         switch_ab='-pl',    &
-        help='Pressure levels to interpolate to (nslanbs -1 pressure levels) in Pa',   &
+        help='Pressure levels to interpolate to (in Pa). There should be [nslanbs - 1] pressure levels.',   &
         required=.true.,   &
         act='store',       &
         ! def="70000",          &
@@ -268,8 +275,8 @@ program main
 
 
     allocate(pressure_interslabs(nslabs-1))
-    pressure_interslabs(1) = 70000
-    if (nslabs > 2) pressure_interslabs(2) = 60000
+    ! pressure_interslabs(1) = 70000
+    ! if (nslabs > 2) pressure_interslabs(2) = 60000
 
     call cli%get_varying(switch='-pl', val=pressure_interslabs, error=error_cli)
     if (error_cli/=0) stop
@@ -288,11 +295,15 @@ program main
 
     print *, file_list_files
     call read_list_files(file_list_files, files_all, rem_file)
-    n_all_chunks = size(files_all) / n_files_by_chunk
+    n_all_chunks = (size(files_all)) / n_files_by_chunk
     ! print *,size(files_all)
     
-    ! STOP
-
+    if (MOD(size(files_all), n_files_by_chunk) /= 0) then
+        print *, "The number of files is not compatible with the required timefactor&
+        &. By default he program expects [n x timefactor + 1 ] files and ignores the last file (n is an integer). &
+        & If only [n x timefactor] files are being provided use option 0 for --remfile argument."
+        STOP
+    end if
     ! getting basename for outputs from input filename
     ! ppos = scan(trim(filename_list_files),".", BACK= .true.)
     ! basename = filename_list_files
