@@ -48,4 +48,4 @@ Then you will be able to call the program `prepro2LDRM-slabvars` from any direct
 
 ## Additional binary files required by 2L-DRM
 - Precipitation (PP) and Evapotranspiration can be calculated using the python programs in the folder `other_programs/PP-ET_programs`. To know the arguments required by those programs, please use `python ET_preprocessing_2LDRM.py --help` or  `python PP_preprocessing_2LDRM_fromRAINNC-C.py --help` .
-
+- Other scripts for additional inputs can be found in `other_programs/additional_scripts`
