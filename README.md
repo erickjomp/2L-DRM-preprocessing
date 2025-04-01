@@ -43,8 +43,9 @@ Then you will be able to call the program `prepro2LDRM-slabvars` from any direct
 
 
 ## Notes
-- The data in the generated  binary files is in Fortran-like memory order (read more about it here https://manik.cc/2021/02/25/memory-order.html). As a rule of thumb, if you want an input binary file with dimensions (nx, ny, 2, ndays) and you are going to write it from a Python numpy array, the numpy array must have dimensions (ndays, 2, ny, nx).
-- The precipitable water flux at the interslab (PWflux) as calculated by $\rho_{air} w_{wind} q$, where $\rho_{air}$ is the density of the air, $w_{wind}$ is the vertical wind velocity and $q$ is the specific humidity at the interslab pressure level.
+- The data in the generated  binary files is in Fortran-like memory order (read more about it here https://manik.cc/2021/02/25/memory-order.html). As a rule of thumb, when reading the binary files  as arrays in python, you should reshape it to dimensions (ntimes, nslabs, ny, nx), except PWflux which has to be reshaped to (ntimes, nslabs-1, ny, nx).
+
+- The precipitable water flux at the interslab (PWflux) is calculated by $\rho_{air} w_{wind} q$, where $\rho_{air}$ is the density of the air, $w_{wind}$ is the vertical wind velocity and $q$ is the specific humidity at the interslab pressure level.
 
 ## Additional binary files required by 2L-DRM
 - Precipitation (PP) and Evapotranspiration can be calculated using the python programs in the folder `other_programs/PP-ET_programs`. To know the arguments required by those programs, please use `python ET_preprocessing_2LDRM.py --help` or  `python PP_preprocessing_2LDRM_fromRAINNC-C.py --help` .
