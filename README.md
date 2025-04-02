@@ -14,8 +14,8 @@ for more information about the options and arguments of this preprocessing progr
 
 This program is entirely written in Fortran and is computationally very efficient. To build and compile it, you need to have the following installed:
 1. A Fortran compiler that supports the module ieee_arithmetic is required (any compiler that implements the Fortran 2003 standard or higher should be fine). I did it with the compiler included in GNU/GCC 9.3.0. 
-2. A compatible NetCDF4 libary.
-3. A compatible MPI implementation (MPI is used for parallelization capabilities)
+2. A compatible NetCDF4 library.
+3. A compatible MPI library (MPI is used for parallelization capabilities)
 4. Fortran Package Manager (fpm). See intructions for installing it here: https://github.com/fortran-lang/fpm. I installed it using a conda environment.
 
 Then you can clone this repository in a local directory: 
@@ -49,4 +49,4 @@ Then you will be able to call the program `prepro2LDRM-slabvars` from any direct
 
 ## Additional binary files required by 2L-DRM
 - Precipitation (PP) and Evapotranspiration can be calculated using the python programs in the folder `other_programs/PP-ET_programs`. To know the arguments required by those programs, please use `python ET_preprocessing_2LDRM.py --help` or  `python PP_preprocessing_2LDRM_fromRAINNC-C.py --help` .
-- Other scripts for additional inputs can be found in `other_programs/additional_scripts`
+- Other scripts for additional 2L-DRM inputs can be found in `other_programs/additional_scripts`
