@@ -829,6 +829,9 @@ program main
             close(13, status = "delete")
             close(14, status = "delete")
             close(15, status = "delete")
+
+            close(21, status = "delete")      ! from PWFLUX program
+            close(22, status = "delete")      ! from PWFLUX program
         end do
 
         close(111)
