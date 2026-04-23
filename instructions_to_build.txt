@@ -1,4 +1,8 @@
 Please run:
 fpm build  --link-flag "-L/sw/netcdf4-4.7.4-gnu-9.3.0/lib"
 
+fpm build --compiler ifx  --link-flag "-L/sw/netcdf4-4.9.2-intel-15.0.3/lib"
+
+This works on keeling:
+fpm build --compiler gfortran --flag "-fallow-argument-mismatch"
 # from here: https://fortran-lang.discourse.group/t/how-to-pass-compiling-and-linking-flags-to-fpm/4404/3

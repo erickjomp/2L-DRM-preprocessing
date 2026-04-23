@@ -28,8 +28,8 @@ contains
     subroutine coarsen_xy_grid(data_in, data_out,nx, ny, nz, nt, coarse_factor)
         use, intrinsic :: ieee_arithmetic
         real(4), dimension(nx,ny,nz,nt), intent(in)                              :: data_in
-        real(4), dimension(nx/coarse_factor,ny/coarse_factor,nz,nt), intent(out) :: data_out
         integer, intent(in)                                                      :: nx, ny,nz, nt, coarse_factor
+        real(4), dimension(nx/coarse_factor,ny/coarse_factor,nz,nt), intent(out) :: data_out
         integer                                                                  :: i,j,k,i_t
         integer                                                                  :: nx_out, ny_out
         

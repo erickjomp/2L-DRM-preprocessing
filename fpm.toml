@@ -10,6 +10,7 @@ auto-tests = true
 auto-examples = true
 module-naming = false
 external-modules = "netcdf4"
+link = ["netcdf", "netcdff"]
 [install]
 library = false
 [fortran]
@@ -19,6 +20,6 @@ source-form = "free"
 [dependencies]
 FLAP = { git="https://github.com/szaghi/FLAP.git" }
 mpi = "*"
-#netcdf-interfaces = { git = "https://github.com/LKedward/netcdf-interfaces.git" }
+netcdf-interfaces = { git = "https://github.com/LKedward/netcdf-interfaces.git" }
 ffilesystem = { git = "https://github.com/scivision/fortran-filesystem.git" } # https://github.com/scivision/fortran-filesystem # dont forget to set envir var FPM_CXXFLAGS
 # other good alternative for getting basenames https://github.com/urbanjost/M_io 
