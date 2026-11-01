@@ -48,10 +48,15 @@ PRESSURE_LEVEL = {"pl50000": 50000.0, "pl95000": 95000.0}
 REFERENCE_CASES = ["pl50000", "pl95000"]
 
 # output name -> number of levels (slabs, or interslabs for variables at the slab boundaries)
-OUTPUTS = {
+SLAB_OUTPUTS = {
     "PW": NSLABS, "U": NSLABS, "V": NSLABS,
     "W": NSLABS - 1, "Q": NSLABS - 1, "PWflux": NSLABS - 1, "moistdensity": NSLABS - 1,
 }
+# PP and ET have no levels: read as one level, (nt, 1, ny, nx), which is the same binary layout
+SURFACE_OUTPUTS = {"PP": 1, "ET": 1}
+OUTPUTS = {**SLAB_OUTPUTS, **SURFACE_OUTPUTS}
+NO_PP_ET = "-noppet"
+SECONDS_PER_FILE = 3600
 
 # Same compiler and flags reproduce the reference bit for bit; the tolerance
 # leaves room for other compilers, optimization levels and platforms.
@@ -108,12 +113,14 @@ def nc_path(outdir, period=None, basename=BASENAME):
 def expected_files(outdir, args, basename):
     """Output files of a run without --split."""
     if "bin" in args:
-        return [output_path(outdir, name, basename=basename) for name in OUTPUTS]
+        names = SLAB_OUTPUTS if NO_PP_ET in args else OUTPUTS
+        return [output_path(outdir, name, basename=basename) for name in names]
     return [nc_path(outdir, basename=basename)]
 
 
 def reference_path(case, name):
-    return REF_DIR / case / f"{name}.dat.gz"
+    """PP and ET do not depend on the pressure levels: one reference for all cases."""
+    return REF_DIR / ("surface" if name in SURFACE_OUTPUTS else case) / f"{name}.dat.gz"
 
 
 def to_grid(raw, name, nx=NX, ny=NY):
@@ -130,6 +137,9 @@ def read_nc(path):
     with netCDF4.Dataset(path) as nc:
         nc.set_auto_mask(False)
         data = {name: var[...] for name, var in nc.variables.items()}
+        for name in SURFACE_OUTPUTS:  # (nt, ny, nx) -> (nt, 1, ny, nx), as read_output
+            if name in data:
+                data[name] = data[name][:, None]
         attrs = {name: {a: var.getncattr(a) for a in var.ncattrs()} for name, var in nc.variables.items()}
         attrs["global"] = {a: nc.getncattr(a) for a in nc.ncattrs()}
         dims = {name: len(dim) for name, dim in nc.dimensions.items()}
@@ -141,6 +151,43 @@ def read_wrf(var):
     with netCDF4.Dataset(sorted(CASE_DIR.glob("wrfout_*.nc"))[0]) as nc:
         nc.set_auto_mask(False)
         return nc[var][0]
+
+
+def read_wrf_all(var, case_dir=CASE_DIR):
+    """A variable of all the input files (49, with the one -rf 2 drops), (nfiles, ny, nx)."""
+    out = []
+    for f in sorted(case_dir.glob("wrfout_*.nc")):
+        with netCDF4.Dataset(f) as nc:
+            nc.set_auto_mask(False)
+            out.append(nc[var][0])
+    return np.array(out)
+
+
+def coarsen(data, cf):
+    """Block mean over cf x cf cells of (..., ny, nx)."""
+    if cf == 1:
+        return data
+    *lead, ny, nx = data.shape
+    return data.reshape(*lead, ny // cf, cf, nx // cf, cf).mean(axis=(-3, -1))
+
+
+def pp_from_wrf(cf=1, case_dir=CASE_DIR):
+    """Expected PP, (nt, 1, ny, nx): accumulated rain (with buckets) at the end of each step
+    minus at its start, the steps going from file n * TIME_FACTOR to (n + 1) * TIME_FACTOR."""
+    rain = sum(read_wrf_all(v, case_dir).astype("f8") + 100.0 * read_wrf_all(f"I_{v}", case_dir)
+               for v in ["RAINNC", "RAINC"])
+    bounds = coarsen(rain[::TIME_FACTOR], cf)
+    return np.diff(bounds, axis=0)[:, None]
+
+
+def et_from_wrf(cf=1, first_file=0):
+    """Expected ET, (nt, 1, ny, nx): sum over the files of each step of LH / Lv(T2B) times
+    the seconds per file, negative values set to 0 (after coarsening, as the python program)."""
+    lh, t2b = read_wrf_all("LH"), read_wrf_all("T2B")
+    rate = lh / (np.float32(4185.5) * (np.float32(751.78) - np.float32(0.5655) * t2b))
+    rate = coarsen(rate[first_file:first_file + NFILES_USED].astype("f8"), cf)
+    steps = rate.reshape(-1, TIME_FACTOR, *rate.shape[1:]).sum(axis=1) * SECONDS_PER_FILE
+    return np.maximum(steps, 0)[:, None]
 
 
 def read_reference(case, name):

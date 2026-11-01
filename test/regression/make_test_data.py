@@ -6,7 +6,9 @@ month boundary (2018-05-31 00:00 .. 2018-06-02 00:00, 49 files). Only the
 variables read by prepro2LDRM-slabvars are kept. The same window and time
 steps are cut from the outputs of the original run
 (scratch/2LDRM_AMZ2/scripts/01_process_slabsvars_CPM-4km__2levels500.sh),
-which become the reference of the "pl50000" case. The pressure of the lowest
+which become the reference of the "pl50000" case, and from the PP and ET outputs
+of the former python programs (01_process_2Dvars_CPM-4km_3H.sh), the reference of
+PP and ET ("surface"). The pressure of the lowest
 model level is also saved (data/p_lowest_level.dat.gz), so the tests can tell
 where the ground is above an interslab level without reading NetCDF.
 
@@ -18,7 +20,8 @@ Only needed to regenerate the case (requires access to keeling, numpy and netCDF
 
     python make_test_data.py [--out-data DIR] [--out-ref DIR]
 
-The reference files are raw float32 in Fortran order: (nx, ny, nslabs, nt).
+The reference files are raw float32 in Fortran order: (nx, ny, nslabs, nt), or
+(nx, ny, nt) for PP and ET.
 """
 import argparse
 import gzip
@@ -42,11 +45,16 @@ FIRST_FILE = "2018-05-31_00:00:00"
 NFILES = 49           # 48 hourly files used (-rf 2 drops the last one)
 TIME_FACTOR = 3       # -tf of the original run
 
-WRF_VARS = ["P", "PB", "U", "V", "W", "T", "QVAPOR", "XLAT", "XLONG"]
+WRF_VARS = ["P", "PB", "U", "V", "W", "T", "QVAPOR", "XLAT", "XLONG",
+            "RAINNC", "RAINC", "I_RAINNC", "I_RAINC", "LH", "T2B"]
+WRF_ATTRS = ["BUCKET_MM", "CU_PHYSICS"]
 
 # name -> number of levels (slabs or interslabs) in the reference outputs
 REF_VARS = {"PW": NSLABS, "U": NSLABS, "V": NSLABS,
             "W": NSLABS - 1, "Q": NSLABS - 1, "PWflux": NSLABS - 1, "moistdensity": NSLABS - 1}
+# outputs of the python programs (-tf 3, -ovar PP and ET), without levels
+REF_SURFACE_SRC = Path("/data/keeling/a/erickkc2/scratch/2LDRM_AMZ2/01_inputs/CPM")
+REF_SURFACE_VARS = ["PP", "ET"]
 
 
 def crop_slices(dims):
@@ -74,12 +82,13 @@ def crop_wrfout(src, dst):
         for name, size in sizes.items():
             fout.createDimension(name, size)
         fout.title = f"Cropped from {src.name}: west_east {I0}:{I0 + NXC}, south_north {J0}:{J0 + NYC}"
+        fout.setncatts({name: fin.getncattr(name) for name in WRF_ATTRS})
 
         times = fout.createVariable("Times", "S1", ("Time", "DateStrLen"))
         times[0, :] = fin["Times"][0, :]
         for name in WRF_VARS:
             var = fin[name]
-            out = fout.createVariable(name, "f4", var.dimensions, zlib=True, complevel=9, shuffle=True)
+            out = fout.createVariable(name, var.dtype, var.dimensions, zlib=True, complevel=9, shuffle=True)
             out.setncatts({k: var.getncattr(k) for k in var.ncattrs()})
             out[0, ...] = var[crop_slices(var.dimensions)]
         # pressure of the lowest model level, summed in float32 like the program does
@@ -92,19 +101,21 @@ def write_gz(path, array):
         f.write(np.ascontiguousarray(array, dtype="<f4").tobytes())
 
 
-def crop_reference(name, nlev, start, count, out_dir):
-    data = np.memmap(REF_SRC / f"{REF_BASENAME}_{name}.dat", dtype="<f4", mode="r").reshape(-1, nlev, NY, NX)
+def crop_reference(name, nlev, start, count, out_dir, src_dir=REF_SRC):
+    shape = (-1, NY, NX) if nlev is None else (-1, nlev, NY, NX)
+    data = np.memmap(src_dir / f"{REF_BASENAME}_{name}.dat", dtype="<f4", mode="r").reshape(shape)
     # C order (nt, nlev, ny, nx) is the Fortran order (nx, ny, nlev, nt) of the program outputs
-    write_gz(out_dir / f"{name}.dat.gz", data[start:start + count, :, J0:J0 + NYC, I0:I0 + NXC])
+    write_gz(out_dir / f"{name}.dat.gz", data[start:start + count, ..., J0:J0 + NYC, I0:I0 + NXC])
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--out-data", type=Path, default=HERE / "data")
     parser.add_argument("--out-ref", type=Path, default=HERE / "reference" / "pl50000")
+    parser.add_argument("--out-ref-surface", type=Path, default=HERE / "reference" / "surface")
     args = parser.parse_args()
-    args.out_data.mkdir(parents=True, exist_ok=True)
-    args.out_ref.mkdir(parents=True, exist_ok=True)
+    for path in (args.out_data, args.out_ref, args.out_ref_surface):
+        path.mkdir(parents=True, exist_ok=True)
 
     files = [Path(f) for f in LIST_FILES.read_text().split()]
     first = next(i for i, f in enumerate(files) if f.name.endswith(FIRST_FILE))
@@ -124,6 +135,11 @@ def main():
     for name, nlev in REF_VARS.items():
         crop_reference(name, nlev, first // TIME_FACTOR, nused // TIME_FACTOR, args.out_ref)
         print(f"reference {name}: steps {first // TIME_FACTOR}..{(first + nused) // TIME_FACTOR - 1}")
+    # the python programs used the whole list: step n goes from file n * time factor to
+    # file (n + 1) * time factor (PP) and sums its time factor files from the first (ET)
+    for name in REF_SURFACE_VARS:
+        crop_reference(name, None, first // TIME_FACTOR, nused // TIME_FACTOR, args.out_ref_surface,
+                       REF_SURFACE_SRC)
 
 
 if __name__ == "__main__":

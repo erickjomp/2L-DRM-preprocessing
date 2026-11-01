@@ -16,6 +16,7 @@ program main
     use stdlib_error, only: state_type
     use stdlib_datetime, only: datetime_type, operator(-), total_seconds
     use mod_output, only: output_files, run_info
+    use mod_surface, only: read_accum_rain, add_evap_rate
 
     implicit none
     ! include 'mpif.h'
@@ -69,6 +70,15 @@ program main
     ! character(99)                                :: string ! String value.
     integer                                      :: error_cli  ! Error trapping flag.
     integer                                      :: rem_file
+    character(len=:), allocatable                :: removed_file   ! file removed by --remfile ('' if none)
+
+    ! precipitation (PP) and evapotranspiration (ET)
+    logical                                      :: with_pp_et
+    character(len=20)                            :: vars_rain(2), vars_rain_bucket(2), var_LH, var_temp_ET
+    real(4), dimension(:,:), allocatable         :: work_2d_a, work_2d_b, work_2d_coarse, data_PP_out, data_ET_out
+    integer, dimension(:,:), allocatable         :: work_2d_int
+    real(8), dimension(:,:), allocatable         :: et_sum, rain_start, rain_end
+    logical                                      :: has_rain_start
 
     real(4), dimension(:,:,:,:), allocatable     :: data_pottemp 
     real(4), dimension(:,:,:,:), allocatable     :: data_pottemp_inter, data_temp_inter, data_mixingratio_inter, data_density_inter
@@ -76,7 +86,8 @@ program main
                                                     data_density_out
     character(len=20)                            :: var_PWflux, var_density, var_perturbation_pottemp ! from PWFLUX program
     logical                                      :: cum_per_timestep, save_density   ! from PWFLUX program
-    real(4)                                      :: nseconds_in_timestep             ! from PWFLUX program
+    real(4)                                      :: nseconds_in_timestep  ! seconds between WRF files, from their Times
+    integer                                      :: nseconds_cli          ! --nseconds, 0 if not given
     real(4)                                      :: base_state_pottemp               ! from PWFLUX program
     integer                                      :: i_interslab                      ! from PWFLUX program
     real(4)                                      :: Rd, kappa, P0                    ! from PWFLUX program
@@ -114,6 +125,14 @@ program main
     var_What = "W"
     var_mixing_ratio = "QVAPOR"
 
+    ! PP: accumulated rain (resolved and convective), and bucket counters (with the bucket
+    ! size of the BUCKET_MM attribute); missing ones count as 0
+    vars_rain = [character(len=20) :: "RAINNC", "RAINC"]
+    vars_rain_bucket = [character(len=20) :: "I_RAINNC", "I_RAINC"]
+    ! ET: latent heat flux (W m-2) and temperature for the latent heat of vaporization (K)
+    var_LH = "LH"
+    var_temp_ET = "T2B"
+
     ! allocate(pressure_interslabs(nslabs-1))
     ! pressure_interslabs(1) = 70000
     ! if (nslabs > 2) pressure_interslabs(2) = 60000
@@ -130,7 +149,6 @@ program main
 
     var_PWflux = "PWflux"
     cum_per_timestep = .true.
-    nseconds_in_timestep = 60*60  ! number of seconds per timestep in input data
     save_density = .true.
     var_density = "moistdensity"
     !############################################################################################################!
@@ -152,7 +170,8 @@ program main
     ! call cli%init(help = "ave")
 
     call cli%init(description = 'Program that processes WRF outputs and writes the input files for running 2L-DRM: &
-                                    &PW, U, V and PWflux, in one NetCDF file (default) or as binary files (--format bin). &
+                                    &PW, U, V, PWflux, PP (precipitation) and ET (evapotranspiration), in one NetCDF &
+                                    &file (default) or as binary files (--format bin). &
                                     &W, Q and moistdensity are written only for validation purposes.', &
                   help = "Usage: mpirun [mpirun_optional_arguments] (no mpirun needed for a serial build) ")
     call cli%add(switch='--listfiles', &
@@ -244,6 +263,28 @@ program main
         error=error_cli)
     if (error_cli/=0) error stop
 
+    call cli%add(switch='--no_pp_et', &
+        switch_ab='-noppet',    &
+        help='Do not write PP and ET (for WRF files without RAINNC/RAINC, LH or T2B). &
+            &PP of an output step is the accumulated rain at its end minus at its start, so it needs &
+            &[n x timefactor + 1] files and --remfile 1 or 2: the removed file is used as the end (or start) &
+            &of the last (or first) step. ET is the sum over the files of a step of LH / Lv(T2B).',   &
+        required=.false.,   &
+        act='store_true',       &
+        def='.false.',          &
+        error=error_cli)
+    if (error_cli/=0) error stop
+
+    call cli%add(switch='--nseconds', &
+        switch_ab='-nsec',    &
+        help='Seconds between consecutive WRF files (used for PWflux and ET). By default it is calculated &
+            &from the Times of the first two files; if given, it must agree with them.',   &
+        required=.false.,   &
+        act='store',       &
+        def="0",          &
+        error=error_cli)
+    if (error_cli/=0) error stop
+
     call cli%add(switch='--nx', &
         switch_ab='-nx',    &
         help='Number of grid cells in x direction',   &
@@ -320,6 +361,11 @@ program main
     if (error_cli/=0) error stop
     call cli%get(switch='-sp', val=split, error=error_cli)
     if (error_cli/=0) error stop
+    call cli%get(switch='-noppet', val=with_pp_et, error=error_cli)
+    if (error_cli/=0) error stop
+    with_pp_et = .not. with_pp_et
+    call cli%get(switch='-nsec', val=nseconds_cli, error=error_cli)
+    if (error_cli/=0) error stop
     call cli%get(switch='-nx', val=nx, error=error_cli)
     if (error_cli/=0) error stop
     call cli%get(switch='-ny', val=ny, error=error_cli)
@@ -350,7 +396,13 @@ program main
     
 
     print *, file_list_files
-    call read_list_files(file_list_files, files_all, rem_file)
+    call read_list_files(file_list_files, files_all, rem_file, removed_file)
+    if (with_pp_et .and. len(removed_file) == 0) then
+        print *, "PP needs the accumulated rain at the start and end of each output step, so the list of files &
+                 &must have [n x timefactor + 1] files and --remfile must be 1 or 2. Use --no_pp_et to skip PP and ET."
+        error stop
+    end if
+    call get_nseconds()
     n_all_chunks = (size(files_all)) / n_files_by_chunk
     ! print *,size(files_all)
     
@@ -470,6 +522,15 @@ program main
         allocate(data_density_coarse(nx_coarse, ny_coarse, nslabs-1,time_factor))     
         allocate(data_density_out(nx_coarse, ny_coarse, nslabs-1,1)) 
     end if
+    ! PP and ET: only 2-D arrays
+    if (with_pp_et) then
+        allocate(work_2d_a(nx, ny), work_2d_b(nx, ny), work_2d_int(nx, ny), work_2d_coarse(nx_coarse, ny_coarse))
+        allocate(et_sum(nx_coarse, ny_coarse), rain_start(nx_coarse, ny_coarse), rain_end(nx_coarse, ny_coarse))
+        allocate(data_PP_out(nx_coarse, ny_coarse), data_ET_out(nx_coarse, ny_coarse))
+    else
+        allocate(data_PP_out(1, 1), data_ET_out(1, 1))   ! not written
+    end if
+    has_rain_start = .false.
     !############################################################################################################!
     !##################################### END from PWFLUX program ##############################################!
     !############################################################################################################!
@@ -507,6 +568,10 @@ program main
         open(22,  file = prefix_temp  // trim(var_density) // &
         "_proc" // str(process_Rank), status='REPLACE', access='stream')
     end if
+    if (with_pp_et) then
+        open(23, file = prefix_temp // "PP_proc" // str(process_Rank), status='REPLACE', access='stream')
+        open(24, file = prefix_temp // "ET_proc" // str(process_Rank), status='REPLACE', access='stream')
+    end if
     !############################################################################################################!
     !##################################### END from PWFLUX program ##############################################!
     !############################################################################################################!
@@ -541,6 +606,7 @@ program main
         ! end REMOVE
 
         files_chunk = files_all(1+n_files_by_chunk*(i_chunk-1):n_files_by_chunk*i_chunk)
+        if (with_pp_et) et_sum = 0
 
 
         do i_file = 1,size(files_chunk)
@@ -580,6 +646,9 @@ program main
                           trim(file) // ": " // trim(var_perturbation_pottemp))
             call nc_check(nf90_get_var(ncid,varid,data_pottemp), trim(file))                    ! from PWFLUX program
             data_pottemp = data_pottemp + base_state_pottemp                   ! from PWFLUX program
+
+            if (with_pp_et) call add_evap_rate(ncid, file, var_LH, var_temp_ET, nx, ny, coarse_factor, et_sum, &
+                                               work_2d_a, work_2d_b, work_2d_coarse)
 
             call nc_check(nf90_close(ncid), trim(file))
 
@@ -694,6 +763,22 @@ program main
             data_density_out(:,:,:,1)  = sum(data_density_coarse,dim = 4)/time_factor
             write(22)   data_density_out
         end if
+
+        if (with_pp_et) then
+            ! accumulated rain at the start of the step (the end of the previous one) and at its end
+            if (.not. has_rain_start) then
+                call read_accum_rain(boundary_file(n_files_by_chunk*(i_chunk-1)), vars_rain, vars_rain_bucket, &
+                                     nx, ny, coarse_factor, rain_start, work_2d_a, work_2d_int)
+                has_rain_start = .true.
+            end if
+            call read_accum_rain(boundary_file(n_files_by_chunk*i_chunk), vars_rain, vars_rain_bucket, &
+                                 nx, ny, coarse_factor, rain_end, work_2d_a, work_2d_int)
+            data_PP_out = real(rain_end - rain_start, 4)
+            rain_start = rain_end
+            data_ET_out = real(max(et_sum * nseconds_in_timestep, 0d0), 4)
+            write(23) data_PP_out
+            write(24) data_ET_out
+        end if
     !############################################################################################################!
     !##################################### END from PWFLUX program ##############################################!
     !############################################################################################################!
@@ -708,6 +793,11 @@ program main
     close(15)
     close(21)  ! from PWFLUX program
     close(22)  ! from PWFLUX program
+    if (with_pp_et) then
+        close(23)
+        close(24)
+        deallocate(work_2d_a, work_2d_b, work_2d_int, work_2d_coarse, et_sum, rain_start, rain_end)
+    end if
 
     ! CLOSING raw data to store
     deallocate(data_Pvars)
@@ -815,6 +905,10 @@ program main
                     str(i_proc), & 
                     status='OLD', action="read", access='stream')
             end if
+            if (with_pp_et) then
+                open(23, file = prefix_temp // "PP_proc" // str(i_proc), status='OLD', action="read", access='stream')
+                open(24, file = prefix_temp // "ET_proc" // str(i_proc), status='OLD', action="read", access='stream')
+            end if
     !############################################################################################################!
     !##################################### END from PWFLUX program ##############################################!
     !############################################################################################################!
@@ -830,6 +924,8 @@ program main
                 read(21)   data_PWflux_out
                 if (cum_per_timestep) data_PWflux_out = data_PWflux_out * (time_factor * nseconds_in_timestep)
                 if (save_density) read(22) data_density_out
+                if (with_pp_et) read(23) data_PP_out
+                if (with_pp_et) read(24) data_ET_out
 
                 ! times of the first and last file of the output step: the step is labelled with the first
                 ! one and, when splitting, both must be in the same period
@@ -837,6 +933,13 @@ program main
                 if (format == "nc" .or. split /= "none") then
                     time_start_str = read_wrf_time(files_all(1 + n_files_by_chunk*(i_step-1)))
                     time_step = total_seconds(parse_datetime(time_start_str) - time0) / 3600
+                    ! equally spaced files, as assumed for PWflux and ET
+                    if (abs(time_step - (i_step-1) * time_factor * nseconds_in_timestep / 3600d0) > 1d-6) then
+                        write(*,'(A,I0,A)') "Output step ", i_step, " starts at " // time_start_str // &
+                            ", but the WRF files are not equally spaced (" // trim(str(nint(nseconds_in_timestep))) // &
+                            " s between the first two files)"
+                        error stop
+                    end if
                 end if
                 if (split /= "none") then
                     time_end_str = read_wrf_time(files_all(n_files_by_chunk*i_step))
@@ -859,10 +962,10 @@ program main
                         prefix = join_path(path_outputs, basename // "_" // period)
                     end if
                     write (*, "('Writing ', A)") prefix // trim(merge(".nc   ", "_*.dat", format == "nc"))
-                    call outputs%create(format, prefix, nx_coarse, ny_coarse, nslabs, info)
+                    call outputs%create(format, prefix, nx_coarse, ny_coarse, nslabs, with_pp_et, info)
                 end if
                 call outputs%write_step(time_step, data_PW_out, data_U_out, data_V_out, data_What_out, &
-                                        data_Q_out, data_PWflux_out, data_density_out)
+                                        data_Q_out, data_PWflux_out, data_density_out, data_PP_out, data_ET_out)
             end do
 
             close(11, status = "delete")
@@ -873,6 +976,10 @@ program main
 
             close(21, status = "delete")      ! from PWFLUX program
             if (save_density) close(22, status = "delete")      ! from PWFLUX program
+            if (with_pp_et) then
+                close(23, status = "delete")
+                close(24, status = "delete")
+            end if
         end do
 
         call outputs%close()
@@ -894,6 +1001,58 @@ program main
 
 
     write(*, '(A, F8.4)') 'Elapsed time, hr : ',  (stopTime - startTime)/(60*60)
+
+contains
+
+    ! file j of the list before --remfile removed one (j = 0 .. n x timefactor): the
+    ! instants that bound the output steps for PP (step i goes from file (i-1) x timefactor
+    ! to file i x timefactor)
+    function boundary_file(j) result(f)
+        integer, intent(in)           :: j
+        character(len=:), allocatable :: f
+        integer                       :: i
+
+        i = j + merge(0, 1, rem_file == 1)
+        if (i < 1 .or. i > size(files_all)) then
+            f = removed_file
+        else
+            f = trim(files_all(i))
+        end if
+    end function boundary_file
+
+    ! seconds between WRF files, from the Times of the first two files (with the removed
+    ! file if there is only one), checked against --nseconds if given
+    subroutine get_nseconds()
+        character(len=:), allocatable :: second_file
+        real(8)                       :: seconds
+
+        if (size(files_all) > 1) then
+            second_file = trim(files_all(2))
+        else
+            second_file = removed_file
+        end if
+        if (len(second_file) == 0) then
+            if (nseconds_cli <= 0) then
+                print *, "Only one WRF file: give the seconds between WRF files with --nseconds"
+                error stop
+            end if
+            nseconds_in_timestep = nseconds_cli
+            return
+        end if
+        seconds = total_seconds(parse_datetime(read_wrf_time(second_file)) - &
+                                parse_datetime(read_wrf_time(trim(files_all(1)))))
+        seconds = abs(seconds)
+        if (seconds <= 0) then
+            print *, "The first two WRF files have the same time"
+            error stop
+        end if
+        if (nseconds_cli > 0 .and. abs(seconds - nseconds_cli) > 1d-6) then
+            write(*,'(A,I0,A,I0,A)') "--nseconds ", nseconds_cli, " does not agree with the WRF Times (", &
+                                     nint(seconds), " s between the first two files)"
+            error stop
+        end if
+        nseconds_in_timestep = real(seconds, 4)
+    end subroutine get_nseconds
 
 end program  main
 

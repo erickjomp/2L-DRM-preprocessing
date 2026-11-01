@@ -1,13 +1,20 @@
 # prepro2LDRM-slabvars
 
 
-This repository contains the CLI preprocessing program for the 2L-DRM model. This program takes WRF files (wrfout files) as inputs and writes the files that will be the inputs of the 2L-DRM model (Dominguez et al., 2020; Claros et al., 2025), for each slab of the atmosphere:
+This repository contains the CLI preprocessing program for the 2L-DRM model. This program takes WRF files (wrfout files) as inputs and writes the files that will be the inputs of the 2L-DRM model (Dominguez et al., 2020; Claros et al., 2025): for each slab of the atmosphere,
 
 | Variable | Description | Units | Symbol in Claros et al. (2025) |
 |---|---|---|---|
 | PW | precipitable water of the slab: water vapor contained in a unit area column of the slab | kg m-2 | w |
 | U, V | moisture-weighted average of the wind velocity in the slab, along the grid x and y axes | m s-1 | u, v |
 | PWflux | vertical moisture flux at the interslab level, accumulated over the output step: upward if positive, downward if negative | kg m-2 | Fu, Fd |
+
+and at the surface:
+
+| Variable | Description | Units | Symbol in Claros et al. (2025) |
+|---|---|---|---|
+| PP | precipitation accumulated over the output step | kg m-2 | P |
+| ET | evapotranspiration accumulated over the output step | kg m-2 | E |
 
 Other variables at the interslab level (W: vertical wind, Q: specific humidity, moistdensity: density of moist air) are written only for validation purposes.
 
@@ -22,16 +29,24 @@ for more information about the options and arguments of this preprocessing progr
 
 ## Outputs
 
-Each output time step averages `--timefactor` consecutive WRF files (e.g. `-tf 3` with hourly files gives 3-hourly outputs). The output files are named after the list of files given with `--listfiles`, without its extension (`AMZ2_CPM01.txt` gives `AMZ2_CPM01`):
+Each output time step averages `--timefactor` consecutive WRF files (e.g. `-tf 3` with hourly files gives 3-hourly outputs); PWflux, PP and ET are accumulated over the step. The output files are named after the list of files given with `--listfiles`, without its extension (`AMZ2_CPM01.txt` gives `AMZ2_CPM01`):
 
 - `--format nc` (default): one NetCDF file, `AMZ2_CPM01.nc`, with all the variables, the time of each output step (start of the step, in hours since the first WRF time), XLAT/XLONG, the pressure of the interslab levels and the options of the run.
-- `--format bin`: one raw binary file per variable, `AMZ2_CPM01_PW.dat`, `AMZ2_CPM01_U.dat`, ..., as read by 2L-DRM. They have dimensions (nx, ny, nslabs, ntimesteps), with the exception of PWflux, W, Q and moistdensity which have dimensions (nx, ny, nslabs-1, ntimesteps) since they are calculated at the interface between slabs. The binary files are stored in Fortran-memory order (see Notes below).
+- `--format bin`: one raw binary file per variable, `AMZ2_CPM01_PW.dat`, `AMZ2_CPM01_U.dat`, ..., as read by 2L-DRM. They have dimensions (nx, ny, nslabs, ntimesteps), with the exception of PWflux, W, Q and moistdensity which have dimensions (nx, ny, nslabs-1, ntimesteps) since they are calculated at the interface between slabs, and PP and ET, (nx, ny, ntimesteps). The binary files are stored in Fortran-memory order (see Notes below).
 
 With `--split month` (or `year`) a separate set of outputs is written for each month (or year) of the WRF times, e.g. `AMZ2_CPM01_2018-05.nc` or `AMZ2_CPM01_2018-05_PW.dat`. Every output step must be within one month: the list of files should start at 00:00 of a day (see `--remfile`).
 
 The daily PW24 and PWflux24 outputs are no longer written; `--extratimefactor` (`-etf`) is still accepted but ignored.
 
 To keep using existing scripts that feed 2L-DRM with binary files, add `--format bin` to them.
+
+### PP and ET
+
+PP and ET are written by default (they replace the former python programs of `other/PP-ET_programs`, with the same results). `--no_pp_et` skips them, e.g. for WRF files without these variables.
+- PP is the accumulated rain at the end of the output step minus at its start: `RAINNC + RAINC + BUCKET_MM x (I_RAINNC + I_RAINC)`, with the bucket size of the `BUCKET_MM` attribute of the WRF files (`RAINC`, the bucket counters or `BUCKET_MM` count as 0 if missing, as in convection-permitting runs or without the bucket option). So it needs the WRF file at the end of the last step (or at the start of the first one): the list of files must have [n x timefactor + 1] files, and `--remfile` must be 2 (the default) or 1. Output step n goes from file (n-1) x timefactor to file n x timefactor of the whole list.
+- ET is the sum over the files of the output step of `LH / Lv` times the seconds between files, where `Lv = 4185.5 (751.78 - 0.5655 T2B)` (J kg-1) is the latent heat of vaporization; negative values are set to 0.
+
+The seconds between WRF files (for PWflux and ET) are calculated from the `Times` of the first two files; `--nseconds` is optional and must agree with them.
 
 
 ## Build
@@ -113,7 +128,7 @@ On the login node, MPI runs need `export OMPI_MCA_pml=ob1` (the default UCX tran
 - U and V are along the axes of the WRF grid (as the WRF U and V), not true east and north.
 
 ## Additional binary files required by 2L-DRM
-- Precipitation (PP) and Evapotranspiration can be calculated using the python programs in the folder `other/PP-ET_programs`. To know the arguments required by those programs, please use `python ET_preprocessing_2LDRM.py --help` or  `python PP_preprocessing_2LDRM_fromRAINNC-C.py --help` .
+- Precipitation (PP) and evapotranspiration (ET) are now written by this program (see Outputs). The former python programs are kept in `other/PP-ET_programs` for reference.
 - Other scripts for additional 2L-DRM inputs can be found in `other/additional_scripts`
 
 ## References

@@ -4,8 +4,9 @@ module IO
     ! length of the buffers for paths and file names (the maximum path length in Linux)
     integer, parameter :: len_path = 4096
 contains
-    ! if not removing initial or last file, rem_file should equal to 0
-    subroutine read_list_files(text_file, files, rem_file)
+    ! if not removing initial or last file, rem_file should equal to 0; removed is the
+    ! removed file ('' if none)
+    subroutine read_list_files(text_file, files, rem_file, removed)
         ! https://fortran-lang.discourse.group/t/allocation-of-array-for-reading-strings-from-a-text-file/5986/4
         ! files is allocated with the length of the longest line, not len_path: every MPI
         ! process keeps the whole list, which can have tens of thousands of files
@@ -13,6 +14,7 @@ contains
         character(len=*), intent(in)  :: text_file
         character(len=:), intent(out), allocatable :: files(:)
         integer, intent(in)               :: rem_file
+        character(len=:), allocatable, intent(out), optional :: removed
         character(len=len_path) :: buffer
         integer          :: i
         character(len=:), allocatable :: files_temp(:)
@@ -48,10 +50,13 @@ contains
         close(iun)
 
         ! only in case removing file
-        if (rem_file == 1 .or. rem_file == 2) then
+        if (present(removed)) removed = ""
+        if ((rem_file == 1 .or. rem_file == 2) .and. nrecs > 0) then
             if (rem_file == 1) then
+                if (present(removed)) removed = trim(files(1))
                 files_temp = files(2:)
             else if (rem_file == 2) then
+                if (present(removed)) removed = trim(files(nrecs))
                 files_temp = files(:size(files)-1)
             end if
             call move_alloc(files_temp, files)

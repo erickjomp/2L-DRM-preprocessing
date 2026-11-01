@@ -1,6 +1,6 @@
 ! writes the output variables, one output step at a time, either as one NetCDF file
 ! (<prefix>.nc) or as one raw binary file per variable (<prefix>_<variable>.dat, float32
-! in Fortran order (nx, ny, levels, time), as read by 2L-DRM)
+! in Fortran order (nx, ny, levels, time), or (nx, ny, time) for PP and ET, as read by 2L-DRM)
 module mod_output
     use netcdf
     use IO, only: nc_check
@@ -8,13 +8,16 @@ module mod_output
     private
     public :: output_files, run_info, nvars, var_names
 
-    integer, parameter :: nvars = 7
+    integer, parameter :: nvars = 9
     ! order of the arrays given to write_step
     character(len=12), parameter :: var_names(nvars) = &
-        [character(len=12) :: "PW", "U", "V", "W", "Q", "PWflux", "moistdensity"]
-    logical, parameter :: at_interslab(nvars) = [.false., .false., .false., .true., .true., .true., .true.]
+        [character(len=12) :: "PW", "U", "V", "W", "Q", "PWflux", "moistdensity", "PP", "ET"]
+    ! levels of each variable
+    integer, parameter :: surface = 0, slab = 1, interslab = 2
+    integer, parameter :: var_levels(nvars) = [slab, slab, slab, interslab, interslab, interslab, interslab, &
+                                               surface, surface]
     character(len=8), parameter :: var_units(nvars) = &
-        [character(len=8) :: "kg m-2", "m s-1", "m s-1", "m s-1", "kg kg-1", "kg m-2", "kg m-3"]
+        [character(len=8) :: "kg m-2", "m s-1", "m s-1", "m s-1", "kg kg-1", "kg m-2", "kg m-3", "kg m-2", "kg m-2"]
     ! short labels, and the definitions of the Supporting Information of Claros et al. (2025), Text S2
     character(len=40), parameter :: var_long_names(nvars) = [character(len=40) :: &
         "precipitable water of the slab", &
@@ -23,7 +26,9 @@ module mod_output
         "vertical wind at the interslab level", &
         "specific humidity at the interslab level", &
         "moisture flux between slabs", &
-        "moist air density at the interslab level"]
+        "moist air density at the interslab level", &
+        "precipitation", &
+        "evapotranspiration"]
     character(len=140), parameter :: var_descriptions(nvars) = [character(len=140) :: &
         "water vapor contained in a unit area column of the slab (w in Claros et al., 2025)", &
         "moisture-weighted average of the wind velocity in the slab, along the grid x axis (west_east)", &
@@ -32,7 +37,10 @@ module mod_output
         "specific humidity interpolated to the interslab level", &
         "vertical moisture flux at the interslab level, accumulated over the output step: " // &
             "upward (Fu) if positive, downward (Fd) if negative", &
-        "density of moist air at the interslab level"]
+        "density of moist air at the interslab level", &
+        "precipitation accumulated over the output step: RAINNC + RAINC, with the WRF buckets (P)", &
+        "evapotranspiration accumulated over the output step, from the latent heat flux LH / Lv(T2B); " // &
+            "negative values set to 0 (E)"]
 
     ! description of the run, written as global attributes of the NetCDF files
     type :: run_info
@@ -48,22 +56,26 @@ module mod_output
         integer                       :: nx, ny, nslabs, nsteps = 0
         integer                       :: ncid = -1, varid_time
         integer                       :: ids(nvars)       ! NetCDF variable ids or binary units
+        logical                       :: with_pp_et = .true.
         logical                       :: is_open = .false.
     contains
         procedure :: create
+        procedure :: has_var
         procedure :: write_step
         procedure :: close => close_files
     end type output_files
 
 contains
 
-    subroutine create(self, format, prefix, nx, ny, nslabs, info)
+    subroutine create(self, format, prefix, nx, ny, nslabs, with_pp_et, info)
         class(output_files), intent(inout) :: self
         character(len=*), intent(in)       :: format, prefix
         integer, intent(in)                :: nx, ny, nslabs
+        logical, intent(in)                :: with_pp_et
         type(run_info), intent(in)         :: info
         integer                            :: i
 
+        self%with_pp_et = with_pp_et
         self%format = format
         self%prefix = prefix
         self%nx = nx
@@ -72,6 +84,7 @@ contains
         self%nsteps = 0
         if (self%format == "bin") then
             do i = 1, nvars
+                if (.not. self%has_var(i)) cycle
                 open(newunit=self%ids(i), file=self%prefix // "_" // trim(var_names(i)) // ".dat", &
                      status="REPLACE", action="write", access="stream")
             end do
@@ -90,7 +103,7 @@ contains
         character(len=8)                   :: date
         character(len=10)                  :: clock
         integer :: dim_x, dim_y, dim_slab, dim_interslab, dim_time, varid_slab, varid_interslab, &
-                   varid_lat, varid_lon, i, nlev
+                   varid_lat, varid_lon, i
 
         file = self%prefix // ".nc"
         call nc_check(nf90_create(file, ior(nf90_clobber, nf90_netcdf4), self%ncid), file)
@@ -134,22 +147,34 @@ contains
         call put_att(self%ncid, varid_lon, "units", "degree_east")
 
         do i = 1, nvars
-            nlev = merge(self%nslabs - 1, self%nslabs, at_interslab(i))
-            call nc_check(nf90_def_var(self%ncid, trim(var_names(i)), nf90_float, &
-                          [dim_x, dim_y, merge(dim_interslab, dim_slab, at_interslab(i)), dim_time], self%ids(i), &
-                          chunksizes=[self%nx, self%ny, nlev, 1], shuffle=.true., deflate_level=1), file)
+            if (.not. self%has_var(i)) cycle
+            select case (var_levels(i))
+            case (slab)
+                call nc_check(nf90_def_var(self%ncid, trim(var_names(i)), nf90_float, &
+                              [dim_x, dim_y, dim_slab, dim_time], self%ids(i), &
+                              chunksizes=[self%nx, self%ny, self%nslabs, 1], shuffle=.true., deflate_level=1), file)
+            case (interslab)
+                call nc_check(nf90_def_var(self%ncid, trim(var_names(i)), nf90_float, &
+                              [dim_x, dim_y, dim_interslab, dim_time], self%ids(i), &
+                              chunksizes=[self%nx, self%ny, self%nslabs - 1, 1], shuffle=.true., deflate_level=1), file)
+            case default
+                call nc_check(nf90_def_var(self%ncid, trim(var_names(i)), nf90_float, &
+                              [dim_x, dim_y, dim_time], self%ids(i), &
+                              chunksizes=[self%nx, self%ny, 1], shuffle=.true., deflate_level=1), file)
+            end select
             call put_att(self%ncid, self%ids(i), "long_name", trim(var_long_names(i)))
             call put_att(self%ncid, self%ids(i), "description", trim(var_descriptions(i)))
             call put_att(self%ncid, self%ids(i), "units", trim(var_units(i)))
             call put_att(self%ncid, self%ids(i), "coordinates", coords)
-            if (at_interslab(i)) then
-                call put_att(self%ncid, self%ids(i), "comment", "NaN where the interslab level is below the ground")
-            else
+            select case (var_levels(i))
+            case (slab)
                 call put_att(self%ncid, self%ids(i), "comment", "NaN where the whole slab is below the ground")
-            end if
+            case (interslab)
+                call put_att(self%ncid, self%ids(i), "comment", "NaN where the interslab level is below the ground")
+            end select
         end do
 
-        call put_att(self%ncid, nf90_global, "title", "2L-DRM inputs: slab variables")
+        call put_att(self%ncid, nf90_global, "title", "2L-DRM inputs")
         call put_att(self%ncid, nf90_global, "source", &
                      "prepro2LDRM-slabvars, https://github.com/erickjomp/2L-DRM-preprocessing")
         call put_att(self%ncid, nf90_global, "references", &
@@ -198,11 +223,21 @@ contains
         call nc_check(nf90_put_att(ncid, varid, name, value), "attribute " // name)
     end subroutine put_att
 
-    ! appends one output step; the arrays are (nx, ny, nslabs or nslabs-1, 1)
-    subroutine write_step(self, time, PW, U, V, W, Q, PWflux, density)
+    ! whether variable i is written (PP and ET only with with_pp_et)
+    logical function has_var(self, i)
+        class(output_files), intent(in) :: self
+        integer, intent(in)             :: i
+
+        has_var = var_levels(i) /= surface .or. self%with_pp_et
+    end function has_var
+
+    ! appends one output step; the arrays are (nx, ny, nslabs or nslabs-1, 1), and (nx, ny)
+    ! for PP and ET (ignored without with_pp_et)
+    subroutine write_step(self, time, PW, U, V, W, Q, PWflux, density, PP, ET)
         class(output_files), intent(inout)      :: self
         real(8), intent(in)                     :: time  ! in the units of run_info%time_units
         real(4), dimension(:,:,:,:), intent(in) :: PW, U, V, W, Q, PWflux, density
+        real(4), dimension(:,:), intent(in)     :: PP, ET
 
         self%nsteps = self%nsteps + 1
         if (self%format == "bin") then
@@ -213,6 +248,10 @@ contains
             write(self%ids(5)) Q
             write(self%ids(6)) PWflux
             write(self%ids(7)) density
+            if (self%with_pp_et) then
+                write(self%ids(8)) PP
+                write(self%ids(9)) ET
+            end if
         else
             call nc_check(nf90_put_var(self%ncid, self%varid_time, [time], start=[self%nsteps]), self%prefix)
             call put_step(1, PW)
@@ -222,6 +261,10 @@ contains
             call put_step(5, Q)
             call put_step(6, PWflux)
             call put_step(7, density)
+            if (self%with_pp_et) then
+                call put_step_2d(8, PP)
+                call put_step_2d(9, ET)
+            end if
         end if
 
     contains
@@ -233,6 +276,14 @@ contains
             call nc_check(nf90_put_var(self%ncid, self%ids(i), data, start=[1, 1, 1, self%nsteps]), &
                           self%prefix // ".nc: " // trim(var_names(i)))
         end subroutine put_step
+
+        subroutine put_step_2d(i, data)
+            integer, intent(in)                 :: i
+            real(4), dimension(:,:), intent(in) :: data
+
+            call nc_check(nf90_put_var(self%ncid, self%ids(i), data, start=[1, 1, self%nsteps]), &
+                          self%prefix // ".nc: " // trim(var_names(i)))
+        end subroutine put_step_2d
     end subroutine write_step
 
     subroutine close_files(self)
@@ -242,7 +293,7 @@ contains
         if (.not. self%is_open) return
         if (self%format == "bin") then
             do i = 1, nvars
-                close(self%ids(i))
+                if (self%has_var(i)) close(self%ids(i))
             end do
         else
             call nc_check(nf90_close(self%ncid), self%prefix // ".nc")
