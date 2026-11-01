@@ -146,7 +146,7 @@ It needs Python with numpy, netCDF4, geopandas and regionmask:
 
     python -m pip install numpy netCDF4 geopandas regionmask
 
-and `python python/prepro2LDRM_regions.py --help` gives its options.
+and `python python/prepro2LDRM_regions.py --help` gives its options. From another directory, give the path of the file, e.g. `python /path/to/2L-DRM-preprocessing/python/prepro2LDRM_regions.py ...`.
 
 
 ## Tests
