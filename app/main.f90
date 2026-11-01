@@ -76,7 +76,7 @@ program main
     logical                                      :: with_pp_et
     character(len=20)                            :: vars_rain(2), vars_rain_bucket(2), var_QFX, var_LH, var_temp_ET
     character(len=3)                             :: et_from   ! QFX or LH
-    real(4), dimension(:,:), allocatable         :: work_2d_a, work_2d_b, work_2d_coarse, data_PP_out, data_ET_out
+    real(4), dimension(:,:), allocatable         :: work_2d_a, work_2d_b, data_PP_out, data_ET_out
     integer, dimension(:,:), allocatable         :: work_2d_int
     real(8), dimension(:,:), allocatable         :: et_sum, rain_start, rain_end
     logical                                      :: has_rain_start
@@ -545,7 +545,6 @@ program main
         allocate(work_2d_a(nx, ny), work_2d_int(nx, ny))
         ! only when used, otherwise not present in add_evap_rate
         if (et_from == "LH") allocate(work_2d_b(nx, ny))
-        if (coarse_factor > 1) allocate(work_2d_coarse(nx_coarse, ny_coarse))
         allocate(et_sum(nx_coarse, ny_coarse), rain_start(nx_coarse, ny_coarse), rain_end(nx_coarse, ny_coarse))
         allocate(data_PP_out(nx_coarse, ny_coarse), data_ET_out(nx_coarse, ny_coarse))
     else
@@ -669,7 +668,7 @@ program main
             data_pottemp = data_pottemp + base_state_pottemp                   ! from PWFLUX program
 
             if (with_pp_et) call add_evap_rate(ncid, file, et_from, var_QFX, var_LH, var_temp_ET, nx, ny, &
-                                               coarse_factor, et_sum, work_2d_a, work_2d_b, work_2d_coarse)
+                                               coarse_factor, et_sum, work_2d_a, work_2d_b)
 
             call nc_check(nf90_close(ncid), trim(file))
 
@@ -819,7 +818,6 @@ program main
         close(24)
         deallocate(work_2d_a, work_2d_int, et_sum, rain_start, rain_end)
         if (allocated(work_2d_b)) deallocate(work_2d_b)
-        if (allocated(work_2d_coarse)) deallocate(work_2d_coarse)
     end if
 
     ! CLOSING raw data to store
