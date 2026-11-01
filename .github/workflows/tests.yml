@@ -114,5 +114,7 @@ jobs:
         run: |
           $env:PATH = "${{ steps.msys2.outputs.msys2-location }}\ucrt64\bin;" + $env:PATH
           python -m pip install numpy netCDF4 pytest
-          $serial = if ("${{ matrix.mpi }}" -eq "true") { @() } else { @("--serial") }
-          python -m pytest test/regression -v --exe "$env:EXE" @serial
+          # an explicit array: PowerShell unrolls a one-element array returned by if/else
+          $pytest_args = @("test/regression", "-v", "--exe", "$env:EXE")
+          if ("${{ matrix.mpi }}" -ne "true") { $pytest_args += "--serial" }
+          python -m pytest @pytest_args
