@@ -1,9 +1,9 @@
-# prepro2LDRM-slabvars 
+# prepro2LDRM-slabvars
 
 
-This repository contains the CLI preprocessing program for the 2L-DRM model. This program takes WRF files (wrfout files) as inputs and writes  binary files that will be the inputs of the 2LDRM model. You obtain binary files for: PW (precipitable water), U (moisture weighted u wind-speed), V (moisture weighted v wind-speed) and PWflux (PW vertical flux between slabs). Other variables are written only for validation purposes. 
+This repository contains the CLI preprocessing program for the 2L-DRM model. This program takes WRF files (wrfout files) as inputs and writes the files that will be the inputs of the 2LDRM model: PW (precipitable water), U (moisture weighted u wind-speed), V (moisture weighted v wind-speed) and PWflux (PW vertical flux between slabs). Other variables (W, Q and moistdensity) are written only for validation purposes.
 
-The generated binary files have dimensions (nx, ny, nslabs, ntimesteps), with the exception of PWflux which has dimensions (nx, ny, nslabs-1, ntimesteps) since it is calcualted at the interface between slabs. The binary files are stored in Fortran-memory order (see Notes below).
+The program runs on Linux and Windows, in parallel with MPI or as a serial program.
 
 Once installed, please use:
 
@@ -12,41 +12,94 @@ Once installed, please use:
 for more information about the options and arguments of this preprocessing program.
 
 
+## Outputs
+
+Each output time step averages `--timefactor` consecutive WRF files (e.g. `-tf 3` with hourly files gives 3-hourly outputs). The output files are named after the list of files given with `--listfiles`, without its extension (`AMZ2_CPM01.txt` gives `AMZ2_CPM01`):
+
+- `--format nc` (default): one NetCDF file, `AMZ2_CPM01.nc`, with all the variables, the time of each output step (start of the step, in hours since the first WRF time), XLAT/XLONG, the pressure of the interslab levels and the options of the run.
+- `--format bin`: one raw binary file per variable, `AMZ2_CPM01_PW.dat`, `AMZ2_CPM01_U.dat`, ..., as read by 2L-DRM. They have dimensions (nx, ny, nslabs, ntimesteps), with the exception of PWflux, W, Q and moistdensity which have dimensions (nx, ny, nslabs-1, ntimesteps) since they are calculated at the interface between slabs. The binary files are stored in Fortran-memory order (see Notes below).
+
+With `--split month` (or `year`) a separate set of outputs is written for each month (or year) of the WRF times, e.g. `AMZ2_CPM01_2018-05.nc` or `AMZ2_CPM01_2018-05_PW.dat`. Every output step must be within one month: the list of files should start at 00:00 of a day (see `--remfile`).
+
+The daily PW24 and PWflux24 outputs are no longer written; `--extratimefactor` (`-etf`) is still accepted but ignored.
+
+To keep using existing scripts that feed 2L-DRM with binary files, add `--format bin` to them.
+
+
+## Build
+
 This program is entirely written in Fortran and is computationally very efficient. To build and compile it, you need to have the following installed:
-1. A Fortran compiler that supports the module ieee_arithmetic is required (any compiler that implements the Fortran 2003 standard or higher should be fine). I did it with the compiler included in GNU/GCC 9.3.0. 
-2. A compatible NetCDF4 library.
-3. A compatible MPI library (MPI is used for parallelization capabilities)
-4. Fortran Package Manager (fpm). See intructions for installing it here: https://github.com/fortran-lang/fpm. I installed it using a conda environment.
+1. A Fortran compiler that supports Fortran 2018 `stop ..., quiet=` (needed by FLAP), e.g. gfortran 12 or newer, or ifx.
+2. NetCDF-Fortran (with NetCDF-C), built with a compatible compiler: the program uses its `netcdf` module.
+3. Optionally, an MPI library (MPI is used for parallelization capabilities): Open MPI or MPICH on Linux, MS-MPI on Windows.
+4. Fortran Package Manager (fpm), version 0.13 or newer. See intructions for installing it here: https://github.com/fortran-lang/fpm. It can be installed in a conda environment (`conda install -c conda-forge fpm`).
 
-Then you can clone this repository in a local directory: 
+The other Fortran packages (FLAP and the Fortran standard library, at the same versions as 2L-DRM) are downloaded by fpm.
 
-    clone https://github.com/erickjomp/2L-DRM-preprocessing.git
+Then you can clone this repository in a local directory:
 
-And you can build the 2L-DRM program using:
+    git clone https://github.com/erickjomp/2L-DRM-preprocessing.git
 
-    fpm build
+And you can build the program giving the directory of the `netcdf` module, which `nf-config` prints:
 
-If this does not work, probably you will have to manually specify some linking flags. For instance this worked for me: `fpm build  --link-flag "-L/sw/netcdf4-4.7.4-gnu-9.3.0/lib`
+    fpm build --flag "$(nf-config --fflags)"
 
-And install it using (you may also have to add the same linkign flags as in `fpm build`):
+If the NetCDF libraries are not found when linking, add their directory, e.g. `--link-flag "-L/path/to/netcdf/lib"`. A specific compiler is chosen with `--compiler`, e.g. `--compiler gfortran-13`.
 
-    fpm install
+And install it using (with the same flags as in `fpm build`):
 
+    fpm install --flag "$(nf-config --fflags)"
 
 In addition, if using a Linux system, you may want to add `~/.local/bin/` to your PATH environment. For that, you can edit your `~/.profile` file by adding a line like this:
 
     export PATH=~/.local/bin/:$PATH
 
-Then you will be able to call the program `prepro2LDRM-slabvars` from any directory. For a list of the required and optional inputs of this program, please use:
+Then you will be able to call the program `prepro2LDRM-slabvars` from any directory.
 
-    prepro2LDRM-slabvars --help
+### Serial build (no MPI)
+
+To build without MPI, remove `USE_MPI` from `macros` in the `[preprocess.cpp]` section of `fpm.toml`, and the line `mpi = "*"` from `[dependencies]`. The program then runs without `mpirun` and processes all the files in one process.
+
+### Windows
+
+The simplest way is [MSYS2](https://www.msys2.org) (UCRT64 environment):
+
+    pacman -S git mingw-w64-ucrt-x86_64-gcc-fortran mingw-w64-ucrt-x86_64-netcdf-fortran mingw-w64-ucrt-x86_64-fpm
+    fpm build --flag "-I/ucrt64/include"
+
+For the parallel version, also install `mingw-w64-ucrt-x86_64-msmpi` and the MS-MPI runtime (`msmpisetup.exe` from Microsoft); otherwise use the serial build. On Windows:
+- WRF file names contain `:`, which Windows does not allow: rename them (e.g. `wrfout_d01_2018-05-31_00_00_00`) and use the new names in the list of files.
+- Paths longer than 260 characters need long paths to be enabled in Windows.
+
+The Windows builds are run in the GitHub Actions workflow, but have not been checked on a real machine yet.
+
+
+## Tests
+
+`test/regression` has a regression test with pytest: it runs the program on a small case cropped from the AMZ2 CPM 4 km run (16 x 14 cells over the Andes, 2 days) and compares the outputs with the original run. It needs Python with numpy, netCDF4 and pytest:
+
+    python -m pip install numpy netCDF4 pytest
+    python -m pytest test/regression --exe $(fpm run prepro2LDRM-slabvars --flag "$(nf-config --fflags)" --runner echo | tail -1)
+
+Add `--serial` for a serial build, and `--mpiexec PATH` if `mpiexec` is not in PATH. After an intended change in the results, rerun with `--update-reference` and commit the new references. The tests also run on GitHub Actions (`.github/workflows/tests.yml`) for each push.
+
+### keeling
+
+The default gfortran (11) cannot compile FLAP; use the gcc-toolset-13 one with the system Open MPI and NetCDF-Fortran:
+
+    module load mpi/openmpi-x86_64
+    fpm build --compiler /opt/rh/gcc-toolset-13/root/usr/bin/gfortran --flag "$(nf-config --fflags)"
+
+On the login node, MPI runs need `export OMPI_MCA_pml=ob1` (the default UCX transport fails there with "Connection refused"); the tests set it. Jobs on the compute nodes do not need it.
 
 
 ## Notes
-- The data in the generated  binary files is in Fortran-like memory order (read more about it here https://manik.cc/2021/02/25/memory-order.html). As a rule of thumb, when reading the binary files  as arrays in python, you should reshape it to dimensions (ntimes, nslabs, ny, nx), except PWflux which has to be reshaped to (ntimes, nslabs-1, ny, nx).
+- The data in the generated  binary files is in Fortran-like memory order (read more about it here https://manik.cc/2021/02/25/memory-order.html). As a rule of thumb, when reading the binary files  as arrays in python, you should reshape it to dimensions (ntimes, nslabs, ny, nx), except PWflux which has to be reshaped to (ntimes, nslabs-1, ny, nx). The NetCDF files have the same dimensions in this order: (time, slab, south_north, west_east).
 
-- The precipitable water flux between slabs (PWflux) is calculated by $\rho_{air} w_{wind} q$, where $\rho_{air}$ is the density of the air, $w_{wind}$ is the vertical wind velocity and $q$ is the specific humidity at the interslab pressure level.
+- The precipitable water flux between slabs (PWflux) is calculated by $\rho_{air} w_{wind} q$, where $\rho_{air}$ is the density of the air, $w_{wind}$ is the vertical wind velocity and $q$ is the specific humidity at the interslab pressure level. It is accumulated over each output step (kg m-2).
+
+- Where the ground is above an interslab level, the variables of the slab below it and at that level are NaN.
 
 ## Additional binary files required by 2L-DRM
-- Precipitation (PP) and Evapotranspiration can be calculated using the python programs in the folder `other_programs/PP-ET_programs`. To know the arguments required by those programs, please use `python ET_preprocessing_2LDRM.py --help` or  `python PP_preprocessing_2LDRM_fromRAINNC-C.py --help` .
-- Other scripts for additional 2L-DRM inputs can be found in `other_programs/additional_scripts`
+- Precipitation (PP) and Evapotranspiration can be calculated using the python programs in the folder `other/PP-ET_programs`. To know the arguments required by those programs, please use `python ET_preprocessing_2LDRM.py --help` or  `python PP_preprocessing_2LDRM_fromRAINNC-C.py --help` .
+- Other scripts for additional 2L-DRM inputs can be found in `other/additional_scripts`

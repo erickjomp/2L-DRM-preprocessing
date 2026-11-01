@@ -151,9 +151,10 @@ program main
     ! maybe create a module for this
     ! call cli%init(help = "ave")
 
-    call cli%init(description = 'Program that processes WRF outputs and writes imput binary files for running 2L-DRM. &
-                                    &You obtain binary files for: PW, U, V and PWflux. Other variables are written only for &
-                                    & validation purposes. ',help = "Usage: mpirun [mpirun_optional_arguments]  ")
+    call cli%init(description = 'Program that processes WRF outputs and writes the input files for running 2L-DRM: &
+                                    &PW, U, V and PWflux, in one NetCDF file (default) or as binary files (--format bin). &
+                                    &W, Q and moistdensity are written only for validation purposes.', &
+                  help = "Usage: mpirun [mpirun_optional_arguments] (no mpirun needed for a serial build) ")
     call cli%add(switch='--listfiles', &
                  switch_ab='-lf',    &
                  help='Text file containing the list of WRF output files to read. &
@@ -167,8 +168,10 @@ program main
 
     call cli%add(switch='--pathout', &
                  switch_ab='-po',    &
-                 help='Path where outputs will be saved. The outputs files will take the name of the file listfiles &
-                            &plus the variable name. Created (with its parent directories) if it does not exist.',   &
+                 help='Path where outputs will be saved. Created (with its parent directories) if it does not exist. &
+                            &The output files are named after the file of --listfiles without extension: <name>.nc, &
+                            &or <name>_<variable>.dat with --format bin; with --split the period is added, &
+                            &e.g. <name>_2018-05.nc.',   &
                  required=.true.,   &
                  act='store',       &
                  error=error_cli)
