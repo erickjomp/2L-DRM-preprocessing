@@ -1,1 +1,10 @@
-.mod
+*.mod
+*.o
+
+build*/
+__pycache__/
+.pytest_cache/
+.claude/
+
+# notes for a specific machine
+instructions_to_build.txt

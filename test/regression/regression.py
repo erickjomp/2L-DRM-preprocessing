@@ -61,11 +61,11 @@ def prepare_inputs(workdir):
 
 
 def run_model(exe, workdir, outname, extra_args, nprocs=1, mpiexec=None):
-    """Run the program in workdir, writing to workdir/outname. Returns (outdir, error)."""
+    """Run the program in workdir, writing to workdir/outname. Returns (outdir, error).
+
+    outname must not exist yet: the program creates it (and its parents)."""
     outdir = workdir / outname
-    outdir.mkdir()
-    # the program appends file names to -po as given, so it needs the trailing separator
-    cmd = [str(exe), "-po", f"{outname}/"] + COMMON_ARGS + extra_args
+    cmd = [str(exe), "-po", outname] + COMMON_ARGS + extra_args
     if nprocs > 1:
         cmd = [str(mpiexec), "-n", str(nprocs)] + cmd
     # Open MPI: the UCX transport fails on hosts without a network fabric (e.g. login
@@ -73,6 +73,7 @@ def run_model(exe, workdir, outname, extra_args, nprocs=1, mpiexec=None):
     env = dict(os.environ)
     env.setdefault("OMPI_MCA_pml", "ob1")
     result = subprocess.run(cmd, cwd=workdir, env=env, capture_output=True, text=True)
+    outdir.mkdir(parents=True, exist_ok=True)  # for the log, also if the run failed early
     (outdir / "stdout.txt").write_text(result.stdout + result.stderr)
     missing = [name for name in OUTPUTS if not output_path(outdir, name).is_file()]
     if result.returncode != 0 or missing:

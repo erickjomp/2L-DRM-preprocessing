@@ -9,17 +9,22 @@ auto-executables = true
 auto-tests = true
 auto-examples = true
 module-naming = false
-external-modules = "netcdf4"
-link = ["netcdf", "netcdff"]
+# netcdf module of the installed NetCDF-Fortran: build with --flag "$(nf-config --fflags)"
+external-modules = "netcdf"
+link = ["netcdff", "netcdf"]
 [install]
 library = false
 [fortran]
 implicit-typing = true    #false by default
 implicit-external = true  #false by default
 source-form = "free"
+[preprocess]
+[preprocess.cpp]
+# USE_MPI: parallel version. For a serial build (no MPI library needed), remove
+# USE_MPI here and the mpi dependency below
+macros = ["USE_MPI"]
 [dependencies]
-FLAP = { git="https://github.com/szaghi/FLAP.git" }
+FLAP = { git="https://github.com/szaghi/FLAP.git", tag="v2.5.3" }
 mpi = "*"
-netcdf-interfaces = { git = "https://github.com/LKedward/netcdf-interfaces.git" }
-ffilesystem = { git = "https://github.com/scivision/fortran-filesystem.git" } # https://github.com/scivision/fortran-filesystem # dont forget to set envir var FPM_CXXFLAGS
-# other good alternative for getting basenames https://github.com/urbanjost/M_io 
+# stdlib-fpm branch of fortran-lang/stdlib, same revision as 2L-DRM (stdlib_system is used)
+stdlib = { git="https://github.com/fortran-lang/stdlib", rev="58eb9133966c2797e0593281169ef57c43eccc1d" }

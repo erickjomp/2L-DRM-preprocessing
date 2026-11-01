@@ -8,19 +8,25 @@ program main
     use, intrinsic :: ieee_arithmetic
     use mod_transforming
     use IO
-    use mpi 
+#ifdef USE_MPI
+    use mpi
+#endif
     use FLAP
-    use filesystem, only: stem      ! see other functions here https://github.com/scivision/fortran-filesystem/blob/main/API.md?plain=1
+    use stdlib_system, only: join_path, is_directory, make_directory_all
+    use stdlib_error, only: state_type
 
     implicit none
     ! include 'mpif.h'
 
     integer                                      :: nx, ny, nz, nt, nslabs
-    character(len=150)                           :: path_inputs, path_outputs
-    character(len=50)                            :: filename_list_files, basename
-    character(len=200),dimension(:), allocatable :: files_all
-    character(len=200),dimension(:), allocatable :: files_chunk
-    character(len=200)                           :: file_list_files, file, file_output
+    character(len=len_path)                      :: path_outputs
+    character(len=:), allocatable                :: basename
+    character(len=:),dimension(:), allocatable   :: files_all
+    character(len=:),dimension(:), allocatable   :: files_chunk
+    character(len=len_path)                      :: file_list_files
+    character(len=:), allocatable                :: file
+    character(len=:), allocatable                :: prefix_temp, prefix_out  ! path_outputs + start of the file names
+    type(state_type)                             :: error_mkdir
     integer                                      :: n_vars_P
     character(len=20),dimension(:), allocatable  :: vars_P
     character(len=20)                            :: var_mixing_ratio, var_Uhat, var_Vhat, var_What
@@ -157,7 +163,7 @@ program main
     call cli%add(switch='--pathout', &
                  switch_ab='-po',    &
                  help='Path where outputs will be saved. The outputs files will take the name of the file listfiles &
-                            &plus the variable name.',   &
+                            &plus the variable name. Created (with its parent directories) if it does not exist.',   &
                  required=.true.,   &
                  act='store',       &
                  error=error_cli)
@@ -258,6 +264,17 @@ program main
     if (error_cli/=0) stop
     call cli%get(switch='-po', val=path_outputs, error=error_cli)
     if (error_cli/=0) stop
+    ! a value that fills the buffer was probably cut
+    if (len_trim(file_list_files) == len_path .or. len_trim(path_outputs) == len_path) then
+        write(*,'(A,I0,A)') "The paths given in -lf and -po must be shorter than ", len_path, " characters"
+        error stop
+    end if
+    ! join_path adds the separator, so a trailing one is removed (but not from a root
+    ! like / or C:\)
+    i = len_trim(path_outputs)
+    if (i > 1) then
+        if (scan(path_outputs(i:i), "/\") == 1 .and. path_outputs(i-1:i-1) /= ":") path_outputs(i:) = " "
+    end if
     call cli%get(switch='-tf', val=time_factor, error=error_cli)
     if (error_cli/=0) stop
     call cli%get(switch='-etf', val=extra_time_factor_PW, error=error_cli)
@@ -313,11 +330,32 @@ program main
 
     basename = stem(file_list_files)
     print *, "BASEANAME = ", basename
+    prefix_temp = join_path(path_outputs, "tempdata_" // basename // "_")
+    prefix_out = join_path(path_outputs, basename // "_")
 
+#ifdef USE_MPI
     call MPI_INIT(ierror)
     call MPI_COMM_SIZE(MPI_COMM_WORLD, size_Of_Cluster, ierror)
     call MPI_COMM_RANK(MPI_COMM_WORLD, process_Rank, ierror)
-    
+#else
+    size_Of_Cluster = 1
+    process_Rank = 0
+#endif
+
+    ! the output directory (and its parents) is created if it does not exist; only by
+    ! process 0, the others wait for it before opening their temporary files
+    if (process_Rank == 0 .and. .not. is_directory(trim(path_outputs))) then
+        call make_directory_all(trim(path_outputs), error_mkdir)
+        if (error_mkdir%error()) then
+            write(*,'(A)') "Cannot create output directory '" // trim(path_outputs) // "': " // &
+                           error_mkdir%print_msg()
+            error stop
+        end if
+    end if
+#ifdef USE_MPI
+    call MPI_BARRIER(MPI_COMM_WORLD, ierror)
+#endif
+
 
     ! n_chunks_max = ceiling(n_all_chunks*1.0/size_Of_Cluster)
     ! print *,"n chunks max : ", n_chunks_max
@@ -345,7 +383,7 @@ program main
 
     ! do i_chunk = i_chunk_start(process_Rank+1),i_chunk_end(process_Rank+1)
 
-    allocate(files_chunk(n_files_by_chunk))
+    allocate(character(len=len(files_all)) :: files_chunk(n_files_by_chunk))
 
     allocate(data_U_coarse(nx_coarse, ny_coarse, nslabs,time_factor))      
     allocate(data_V_coarse(nx_coarse, ny_coarse, nslabs,time_factor)) 
@@ -407,30 +445,30 @@ program main
     ! n_chunks = n_chunks_max  ! default, in loop it is updated for last processor
 
 
-    open(11,  file = trim(path_outputs) // "tempdata_" //trim(basename) //"_"  // trim(vars_out_names(1)) // &
+    open(11,  file = prefix_temp  // trim(vars_out_names(1)) // &
                     "_proc" // str(process_Rank), & 
                     status='REPLACE', access='stream')
-    open(12,  file = trim(path_outputs) // "tempdata_" //trim(basename) //"_"  // trim(vars_out_names(2)) // &
+    open(12,  file = prefix_temp  // trim(vars_out_names(2)) // &
                     "_proc" // str(process_Rank), &
                     status='REPLACE', access='stream')
-    open(13,  file = trim(path_outputs) // "tempdata_" //trim(basename) //"_"  // trim(vars_out_names(3)) // &
+    open(13,  file = prefix_temp  // trim(vars_out_names(3)) // &
                     "_proc" // str(process_Rank), &
                     status='REPLACE', access='stream')
-    open(14,  file = trim(path_outputs) // "tempdata_" //trim(basename) //"_"  // trim(vars_out_names(4)) // & 
+    open(14,  file = prefix_temp  // trim(vars_out_names(4)) // & 
                     "_proc" // str(process_Rank), &
                     status='REPLACE', access='stream')
-    open(15,  file = trim(path_outputs) // "tempdata_" //trim(basename) //"_"  // trim(vars_out_names(5)) // & 
+    open(15,  file = prefix_temp  // trim(vars_out_names(5)) // & 
                     "_proc" // str(process_Rank), &
                     status='REPLACE', access='stream')
     
     !############################################################################################################!
     !#######################################  from PWFLUX program ###############################################!
     !############################################################################################################!
-    open(21,  file = trim(path_outputs) // "tempdata_" //trim(basename) //"_"  // trim(var_PWflux) // &
+    open(21,  file = prefix_temp  // trim(var_PWflux) // &
     "_proc" // str(process_Rank), & 
     status='REPLACE', access='stream')
     if (save_density) then
-        open(22,  file = trim(path_outputs) // "tempdata_" //trim(basename) //"_"  // trim(var_density) // &
+        open(22,  file = prefix_temp  // trim(var_density) // &
         "_proc" // str(process_Rank), status='REPLACE', access='stream')
     end if
     !############################################################################################################!
@@ -470,42 +508,44 @@ program main
 
 
         do i_file = 1,size(files_chunk)
-            file = files_chunk(i_file)
+            file = trim(files_chunk(i_file))
             write (*,"('Processor ', I0, ', working in chunk ',I0,', reading file ', A)") process_Rank, i_chunk, trim(file)
 
             
-            status = nf90_open(path = trim(file), mode = nf90_nowrite, ncid = ncid)
+            call nc_check(nf90_open(path = trim(file), mode = nf90_nowrite, ncid = ncid), trim(file))
 
             if (size(vars_P) == 1) then
-                status = nf90_inq_varid(ncid,vars_P(1),varid)
-                status = nf90_get_var(ncid,varid,data_P)
+                call nc_check(nf90_inq_varid(ncid,vars_P(1),varid), trim(file) // ": " // trim(vars_P(1)))
+                call nc_check(nf90_get_var(ncid,varid,data_P), trim(file))
             else 
                 do i = 1,size(vars_P)
-                    status = nf90_inq_varid(ncid,vars_P(i),varid)
-                    status = nf90_get_var(ncid,varid,data_Pvars(:,:,:,:,i))
+                    call nc_check(nf90_inq_varid(ncid,vars_P(i),varid), trim(file) // ": " // trim(vars_P(i)))
+                    call nc_check(nf90_get_var(ncid,varid,data_Pvars(:,:,:,:,i)), trim(file))
                 end do
 
             end if
 
-            status = nf90_inq_varid(ncid,var_Uhat,varid)
-            status = nf90_get_var(ncid,varid,data_Uhat_stag)
+            call nc_check(nf90_inq_varid(ncid,var_Uhat,varid), trim(file) // ": " // trim(var_Uhat))
+            call nc_check(nf90_get_var(ncid,varid,data_Uhat_stag), trim(file))
 
-            status = nf90_inq_varid(ncid,var_Vhat,varid)
-            status = nf90_get_var(ncid,varid,data_Vhat_stag)
+            call nc_check(nf90_inq_varid(ncid,var_Vhat,varid), trim(file) // ": " // trim(var_Vhat))
+            call nc_check(nf90_get_var(ncid,varid,data_Vhat_stag), trim(file))
 
-            status = nf90_inq_varid(ncid,var_What,varid)
-            status = nf90_get_var(ncid,varid,data_What_stag)
+            call nc_check(nf90_inq_varid(ncid,var_What,varid), trim(file) // ": " // trim(var_What))
+            call nc_check(nf90_get_var(ncid,varid,data_What_stag), trim(file))
 
-            status = nf90_inq_varid(ncid,var_mixing_ratio,varid)
-            status = nf90_get_var(ncid,varid,data_Q)   ! actually is mixing ratio, but will be transformed to specific humidity Q
+            call nc_check(nf90_inq_varid(ncid,var_mixing_ratio,varid), trim(file) // ": " // trim(var_mixing_ratio))
+            ! actually is mixing ratio, but will be transformed to specific humidity Q
+            call nc_check(nf90_get_var(ncid,varid,data_Q), trim(file))
             ! data_Q = data_Q / (1+data_Q) ! transforming mixing ratio to Q (specific_humidity)
             data_mixingratio => data_Q
 
-            status = nf90_inq_varid(ncid,var_perturbation_pottemp,varid)       ! from PWFLUX program
-            status = nf90_get_var(ncid,varid,data_pottemp)                     ! from PWFLUX program
+            call nc_check(nf90_inq_varid(ncid,var_perturbation_pottemp,varid), &                ! from PWFLUX program
+                          trim(file) // ": " // trim(var_perturbation_pottemp))
+            call nc_check(nf90_get_var(ncid,varid,data_pottemp), trim(file))                    ! from PWFLUX program
             data_pottemp = data_pottemp + base_state_pottemp                   ! from PWFLUX program
 
-            status = nf90_close(ncid)
+            call nc_check(nf90_close(ncid), trim(file))
 
             data_P = sum(data_Pvars,dim = 5)
             call destagger(data_Uhat_stag, data_Uhat, nx, ny, nz, nt, 1)
@@ -686,7 +726,9 @@ program main
     deallocate(files_chunk)
 
 
+#ifdef USE_MPI
     call MPI_BARRIER(MPI_COMM_WORLD, ierror)
+#endif
     if (process_Rank==0) then
         ! for extra time aggragation PW
         if (mod(extra_time_factor_PW, time_factor) == 0) then
@@ -694,13 +736,13 @@ program main
             if (time_factor_extra > 1) then
                 i_extra = 1
                 allocate(data_PW_temp(nx_coarse, ny_coarse, nslabs, time_factor_extra))
-                open(211,  file = trim(path_outputs) // trim(basename) //"_" // trim(var_PW_extra) //".dat", &
+                open(211,  file = prefix_out // trim(var_PW_extra) //".dat", &
                                 status='REPLACE', action="write", access='stream')
     !############################################################################################################!
     !#######################################  from PWFLUX program ###############################################!
     !############################################################################################################!
                 allocate(data_PWflux_temp(nx_coarse, ny_coarse, nslabs-1, time_factor_extra))
-                open(221,  file = trim(path_outputs) // trim(basename) //"_" // trim(var_PWflux_extra) //".dat", &
+                open(221,  file = prefix_out // trim(var_PWflux_extra) //".dat", &
                                 status='REPLACE', action="write", access='stream')
     !############################################################################################################!
     !##################################### END from PWFLUX program ##############################################!
@@ -712,23 +754,23 @@ program main
         end if
         ! END for extra time aggragation PW
 
-        open(111,file = trim(path_outputs) // trim(basename) //"_" // trim(vars_out_names(1)) //".dat", &
+        open(111,file = prefix_out // trim(vars_out_names(1)) //".dat", &
                 status = "REPLACE", action = "write", access='stream')
-        open(112,file = trim(path_outputs) // trim(basename) //"_" // trim(vars_out_names(2)) //".dat", &
+        open(112,file = prefix_out // trim(vars_out_names(2)) //".dat", &
                 status = "REPLACE", action = "write", access='stream')
-        open(113,file = trim(path_outputs) // trim(basename) //"_" // trim(vars_out_names(3)) //".dat", & 
+        open(113,file = prefix_out // trim(vars_out_names(3)) //".dat", & 
                 status = "REPLACE", action = "write", access='stream')
-        open(114,file = trim(path_outputs) // trim(basename) //"_" // trim(vars_out_names(4)) //".dat", & 
+        open(114,file = prefix_out // trim(vars_out_names(4)) //".dat", & 
                 status = "REPLACE", action = "write", access='stream')
-        open(115,file = trim(path_outputs) // trim(basename) //"_" // trim(vars_out_names(5)) //".dat", & 
+        open(115,file = prefix_out // trim(vars_out_names(5)) //".dat", & 
                 status = "REPLACE", action = "write", access='stream')
     !############################################################################################################!
     !#######################################  from PWFLUX program ###############################################!
     !############################################################################################################!
-        open(121,file = trim(path_outputs) // trim(basename) //"_" // trim(var_PWflux) //".dat", &
+        open(121,file = prefix_out // trim(var_PWflux) //".dat", &
                 status = "REPLACE", action = "write", access='stream')
         if (save_density) then
-            open(122,file = trim(path_outputs) // trim(basename) //"_" // trim(var_density) //".dat", &
+            open(122,file = prefix_out // trim(var_density) //".dat", &
                 status = "REPLACE", action = "write", access='stream')
         end if
     !############################################################################################################!
@@ -736,29 +778,29 @@ program main
     !############################################################################################################!
         do i_proc = 0,(size_Of_Cluster-1)
             write (*, "('Reading results of processor ',I0, ' and writing to final files')") i_proc
-            open(11,  file = trim(path_outputs) // "tempdata_" //trim(basename) //"_" // trim(vars_out_names(1)) // "_proc" // & 
+            open(11,  file = prefix_temp // trim(vars_out_names(1)) // "_proc" // & 
                     str(i_proc), & 
                     status='OLD', action="read", access='stream')
-            open(12,  file = trim(path_outputs) // "tempdata_" //trim(basename) //"_" // trim(vars_out_names(2)) // "_proc" // &
+            open(12,  file = prefix_temp // trim(vars_out_names(2)) // "_proc" // &
                     str(i_proc), &
                     status='OLD', action="read", access='stream')
-            open(13,  file = trim(path_outputs) // "tempdata_" //trim(basename) //"_" // trim(vars_out_names(3)) // "_proc" // &
+            open(13,  file = prefix_temp // trim(vars_out_names(3)) // "_proc" // &
                     str(i_proc), & 
                     status='OLD', action="read", access='stream')
-            open(14,  file = trim(path_outputs) // "tempdata_" //trim(basename) //"_" // trim(vars_out_names(4)) // "_proc" // &
+            open(14,  file = prefix_temp // trim(vars_out_names(4)) // "_proc" // &
                     str(i_proc), & 
                     status='OLD', action="read", access='stream')
-            open(15,  file = trim(path_outputs) // "tempdata_" //trim(basename) //"_" // trim(vars_out_names(5)) // "_proc" // &
+            open(15,  file = prefix_temp // trim(vars_out_names(5)) // "_proc" // &
                     str(i_proc), & 
                     status='OLD', action="read", access='stream')
     !############################################################################################################!
     !#######################################  from PWFLUX program ###############################################!
     !############################################################################################################!
-            open(21,  file = trim(path_outputs) // "tempdata_" //trim(basename) //"_" // trim(var_PWflux) // "_proc" // & 
+            open(21,  file = prefix_temp // trim(var_PWflux) // "_proc" // & 
                     str(i_proc), & 
                     status='OLD', action="read", access='stream')
             if (save_density) then
-                open(22,  file = trim(path_outputs) // "tempdata_" //trim(basename) //"_" // trim(var_density) // "_proc" // & 
+                open(22,  file = prefix_temp // trim(var_density) // "_proc" // & 
                     str(i_proc), & 
                     status='OLD', action="read", access='stream')
             end if
@@ -852,9 +894,11 @@ program main
     deallocate(data_V_out) 
     deallocate(data_PW_out) 
     deallocate(data_Q_out) 
-    deallocate(data_What_out)   
+    deallocate(data_What_out)
 
+#ifdef USE_MPI
     call MPI_FINALIZE(ierror)
+#endif
 
     
 
