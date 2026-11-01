@@ -144,7 +144,7 @@ Add `--serial` for a serial build, and `--mpiexec PATH` if `mpiexec` is not in P
 
   The source region of each cell is the `--field` value of its polygon (1 for all polygons without `--field`), and the largest region + 1 outside the polygons and over the ocean (unless `--keep_ocean`); the target region has no ocean cells either (unless `--keep_ocean`). It prints nregions and domsize, and writes:
   - `--format nc` (default): `<prefix>_regions.nc`, with the map of the source regions (`regions`), the mask of the target region (`target`), XLAT and XLONG, on the same grid as the NetCDF outputs of this program.
-  - `--format bin`: the files that 2L-DRM reads (it does not read NetCDF): `<prefix>_regions.dat`, and `<prefix>_il.dat`, `<prefix>_jl.dat`, the x and y indices of the target-region cells (2L-DRM reads the target region as a list of cells). The indices are 1-based, the Fortran indices used by 2L-DRM: the target files of the former notebooks were 0-based, which 2L-DRM read as the cells one row south and one column west.
+  - `--format bin`: the files that 2L-DRM reads (it does not read NetCDF): `<prefix>_regions.dat`, `<prefix>_target.dat` (the mask of the target region, 1 inside and 0 outside), and `<prefix>_il.dat`, `<prefix>_jl.dat`, the x and y indices of the target-region cells (2L-DRM reads the target region as this list of cells). The indices are 1-based, the Fortran indices used by 2L-DRM: the target files of the former notebooks were 0-based, which 2L-DRM read as the cells one row south and one column west.
 
   It needs numpy, netCDF4, geopandas and regionmask (`python -m pip install numpy netCDF4 geopandas regionmask`).
 - The topography mask and the former notebooks are in `other/additional_scripts`.

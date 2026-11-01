@@ -83,6 +83,12 @@ def run(case, name, target, *args, field=("--field", "ID")):
     regions = np.fromfile(f"{prefix}_regions.dat", np.float32)
     il = np.fromfile(f"{prefix}_il.dat", np.float32).astype(int)
     jl = np.fromfile(f"{prefix}_jl.dat", np.float32).astype(int)
+    # the target grid has the cells of il, jl
+    cf = int(args[args.index("-cf") + 1]) if "-cf" in args else 1
+    nx = 16 // cf
+    target = np.fromfile(f"{prefix}_target.dat", np.float32)
+    assert target.size == regions.size and set(np.unique(target)) <= {0, 1}
+    assert np.array_equal(np.flatnonzero(target), (jl - 1) * nx + il - 1)
     return regions, il, jl
 
 

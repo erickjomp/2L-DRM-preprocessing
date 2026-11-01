@@ -17,6 +17,7 @@ Writes, with --format nc (default), <prefix>_regions.nc with the map of the sour
 the mask of the target region (on the same grid), XLAT and XLONG; with
 --format bin, the files 2L-DRM reads (float32, Fortran order (nx, ny), i.e. numpy (ny, nx)):
 - <prefix>_regions.dat: map of the source regions
+- <prefix>_target.dat: mask of the target region, 1 inside and 0 outside
 - <prefix>_il.dat, <prefix>_jl.dat: x and y indices of the target-region cells, 1-based as the
   Fortran indices of 2L-DRM.
 It prints nx, ny, nregions and the number of target cells (domsize), which 2L-DRM needs.
@@ -180,9 +181,10 @@ def main(argv=None):
         print(f"Written {prefix}_regions.nc")
     else:
         regions.astype(np.float32).tofile(f"{prefix}_regions.dat")
+        target.astype(np.float32).tofile(f"{prefix}_target.dat")
         (il + 1).astype(np.float32).tofile(f"{prefix}_il.dat")
         (jl + 1).astype(np.float32).tofile(f"{prefix}_jl.dat")
-        print(f"Written {prefix}_regions.dat, {prefix}_il.dat, {prefix}_jl.dat")
+        print(f"Written {prefix}_regions.dat, {prefix}_target.dat, {prefix}_il.dat, {prefix}_jl.dat")
 
     ny, nx = regions.shape
     print(f"Target region: {target_desc}")
