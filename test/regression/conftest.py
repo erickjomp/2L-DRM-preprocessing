@@ -11,6 +11,8 @@ def pytest_addoption(parser):
     parser.addoption("--mpiexec", type=Path, default=shutil.which("mpiexec"),
                      help="MPI launcher for the multi-process runs (default: mpiexec in PATH); "
                           "those tests are skipped without it")
+    parser.addoption("--serial", action="store_true",
+                     help="the executable was built without MPI (no USE_MPI): skip the multi-process runs")
     parser.addoption("--update-reference", action="store_true",
                      help="overwrite the reference outputs instead of comparing against them")
 
@@ -28,6 +30,8 @@ def exe(request):
 
 @pytest.fixture(scope="session")
 def mpiexec(request):
+    if request.config.getoption("--serial"):
+        return None
     return request.config.getoption("--mpiexec")
 
 
@@ -51,7 +55,7 @@ def run_case(exe, inputs, mpiexec):
 
     def run(case, nprocs=1):
         if nprocs > 1 and mpiexec is None:
-            pytest.skip("no MPI launcher (mpiexec not in PATH, see --mpiexec)")
+            pytest.skip("serial build (--serial) or no MPI launcher (mpiexec not in PATH, see --mpiexec)")
         if (case, nprocs) not in done:
             done[case, nprocs] = regression.run_model(
                 exe, inputs, f"{case}_np{nprocs}", regression.CASES[case], nprocs, mpiexec)

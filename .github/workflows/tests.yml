@@ -1,0 +1,120 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+# The netcdf module (netcdf.mod) comes from the installed NetCDF-Fortran, so each
+# job uses the gfortran that NetCDF-Fortran was built with: Ubuntu's gfortran with
+# libnetcdff-dev, and MSYS2's gfortran with its netcdf-fortran package on Windows.
+
+jobs:
+  linux:
+    name: ubuntu gfortran ${{ matrix.mpi && 'MPI' || 'serial' }} ${{ matrix.profile }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        mpi: [true, false]
+        profile: [debug, release]
+    defaults:
+      run:
+        shell: bash
+    env:
+      FPM_OPTS: --profile ${{ matrix.profile }} --compiler gfortran
+      # GitHub runners have few cores; the tests start 3 MPI processes
+      OMPI_MCA_rmaps_base_oversubscribe: 1
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install gfortran, NetCDF-Fortran and Open MPI
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gfortran libnetcdff-dev libopenmpi-dev openmpi-bin
+
+      # official fpm binaries, as in 2L-DRM
+      - uses: fortran-lang/setup-fpm@v10
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          fpm-version: 'v0.13.0'
+
+      - name: Install Python packages
+        run: python -m pip install numpy netCDF4 pytest
+
+      - name: Serial build (remove USE_MPI and the mpi dependency)
+        if: ${{ !matrix.mpi }}
+        run: |
+          sed -i 's/^macros = \["USE_MPI"\]/macros = []/; /^mpi = "\*"/d' fpm.toml
+          git diff fpm.toml
+
+      - name: Build
+        run: fpm build $FPM_OPTS --flag "$(nf-config --fflags)"
+
+      - name: Regression test
+        run: |
+          exe=$(fpm run prepro2LDRM-slabvars $FPM_OPTS --flag "$(nf-config --fflags)" --runner echo | tail -1)
+          python -m pytest test/regression -v --exe "$exe" ${{ !matrix.mpi && '--serial' || '' }}
+
+  windows:
+    name: windows MSYS2 gfortran ${{ matrix.mpi && 'MS-MPI' || 'serial' }}
+    runs-on: windows-latest
+    # Windows is not checked on a real machine yet: run it, but do not fail the workflow
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        mpi: [false, true]
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v5
+
+      # MS-MPI runtime (mpiexec, msmpi.dll); the Fortran module comes from MSYS2's msmpi
+      - uses: mpi4py/setup-mpi@v1
+        if: ${{ matrix.mpi }}
+        with:
+          mpi: msmpi
+
+      - uses: msys2/setup-msys2@v2
+        id: msys2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            git
+            mingw-w64-ucrt-x86_64-gcc-fortran
+            mingw-w64-ucrt-x86_64-netcdf-fortran
+            mingw-w64-ucrt-x86_64-fpm
+          pacboy: ${{ matrix.mpi && 'msmpi:p' || '' }}
+
+      - name: Serial build (remove USE_MPI and the mpi dependency)
+        if: ${{ !matrix.mpi }}
+        run: |
+          sed -i 's/^macros = \["USE_MPI"\]/macros = []/; /^mpi = "\*"/d' fpm.toml
+          git diff fpm.toml
+
+      - name: Build
+        run: |
+          fpm build --compiler gfortran --flag "-I/ucrt64/include"
+          exe=$(fpm run prepro2LDRM-slabvars --compiler gfortran --flag "-I/ucrt64/include" --runner echo | tail -1)
+          echo "EXE=$(cygpath -w "$(realpath "$exe")")" >> "$GITHUB_ENV"
+
+      # native Windows Python (wheels for numpy and netCDF4); the program needs the
+      # MSYS2 DLLs (libgfortran, libnetcdf...) in PATH
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Regression test
+        shell: pwsh
+        run: |
+          $env:PATH = "${{ steps.msys2.outputs.msys2-location }}\ucrt64\bin;" + $env:PATH
+          python -m pip install numpy netCDF4 pytest
+          $serial = if ("${{ matrix.mpi }}" -eq "true") { @() } else { @("--serial") }
+          python -m pytest test/regression -v --exe "$env:EXE" @serial
