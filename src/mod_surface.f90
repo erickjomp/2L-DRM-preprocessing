@@ -24,8 +24,8 @@ contains
         character(len=*), intent(in)  :: vars_rain(:), vars_bucket(:)
         integer, intent(in)           :: nx, ny, coarse_factor
         real(8), intent(out)          :: rain(nx/coarse_factor, ny/coarse_factor)
-        real(4), intent(inout)        :: buffer(nx, ny)     ! work arrays
-        integer, intent(inout)        :: ibuffer(nx, ny)
+        real(4), intent(out)          :: buffer(nx, ny)     ! work arrays
+        integer, intent(out)          :: ibuffer(nx, ny)
         real(4)                       :: bucket_mm
         integer                       :: ncid, varid, i, j, iv, cf
         logical                       :: found
@@ -75,8 +75,8 @@ contains
         character(len=*), intent(in)  :: file, et_from, var_qfx, var_lh, var_temp
         integer, intent(in)           :: nx, ny, coarse_factor
         real(8), intent(inout)        :: et_sum(nx/coarse_factor, ny/coarse_factor)
-        real(4), intent(inout)        :: rate(nx, ny), temp(nx, ny)      ! work arrays
-        real(4), intent(inout)        :: et_coarse(nx/coarse_factor, ny/coarse_factor)
+        real(4), intent(out)          :: rate(nx, ny), temp(nx, ny)      ! work arrays
+        real(4), intent(out)          :: et_coarse(nx/coarse_factor, ny/coarse_factor)
 
         if (et_from == "QFX") then
             call read_2d(var_qfx, rate)
