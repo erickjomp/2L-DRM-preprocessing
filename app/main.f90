@@ -14,6 +14,8 @@ program main
     use FLAP
     use stdlib_system, only: join_path, is_directory, make_directory_all
     use stdlib_error, only: state_type
+    use stdlib_datetime, only: datetime_type, operator(-), total_seconds
+    use mod_output, only: output_files, run_info
 
     implicit none
     ! include 'mpif.h'
@@ -25,8 +27,17 @@ program main
     character(len=:),dimension(:), allocatable   :: files_chunk
     character(len=len_path)                      :: file_list_files
     character(len=:), allocatable                :: file
-    character(len=:), allocatable                :: prefix_temp, prefix_out  ! path_outputs + start of the file names
+    character(len=:), allocatable                :: prefix_temp  ! path_outputs + start of the temporary file names
     type(state_type)                             :: error_mkdir
+    character(len=3)                             :: format              ! nc or bin
+    character(len=5)                             :: split               ! none, month or year
+    type(output_files)                           :: outputs
+    type(run_info)                               :: info
+    character(len=:), allocatable                :: prefix, period
+    character(len=19)                            :: time0_str, time_start_str, time_end_str
+    type(datetime_type)                          :: time0
+    real(8)                                      :: time_step           ! hours since time0
+    integer                                      :: i_step
     integer                                      :: n_vars_P
     character(len=20),dimension(:), allocatable  :: vars_P
     character(len=20)                            :: var_mixing_ratio, var_Uhat, var_Vhat, var_What
@@ -151,7 +162,7 @@ program main
                  required=.true.,   &
                  act='store',       &
                  error=error_cli)
-    if (error_cli/=0) stop
+    if (error_cli/=0) error stop
 
 
     call cli%add(switch='--pathout', &
@@ -161,7 +172,7 @@ program main
                  required=.true.,   &
                  act='store',       &
                  error=error_cli)
-    if (error_cli/=0) stop
+    if (error_cli/=0) error stop
 
 
     call cli%add(switch='--timefactor', &
@@ -171,7 +182,7 @@ program main
                  required=.true.,   &
                  act='store',       &
                  error=error_cli)
-    if (error_cli/=0) stop
+    if (error_cli/=0) error stop
 
 
     call cli%add(switch='--extratimefactor', &
@@ -182,7 +193,7 @@ program main
         act='store',       &
         def="0",          &
         error=error_cli)
-    if (error_cli/=0) stop
+    if (error_cli/=0) error stop
 
 
     call cli%add(switch='--coarse_factor', &
@@ -192,7 +203,7 @@ program main
         act='store',       &
         def="1",          &
         error=error_cli)
-    if (error_cli/=0) stop
+    if (error_cli/=0) error stop
 
     call cli%add(switch='--remfile', &
         switch_ab='-rf',    &
@@ -205,8 +216,30 @@ program main
         act='store',       &
         def="2",          &
         error=error_cli)
-    if (error_cli/=0) stop
+    if (error_cli/=0) error stop
 
+
+    call cli%add(switch='--format', &
+        switch_ab='-fmt',    &
+        help='Format of the outputs. nc: one NetCDF file with all the variables. &
+            &bin: one raw binary file per variable (float32, Fortran order), as read by 2L-DRM.',   &
+        required=.false.,   &
+        act='store',       &
+        def="nc",          &
+        choices="nc,bin",  &
+        error=error_cli)
+    if (error_cli/=0) error stop
+
+    call cli%add(switch='--split', &
+        switch_ab='-sp',    &
+        help='Write a separate set of outputs for each month or year (from the WRF Times, the period is &
+            &added to the file names). Every output step must be within one period.',   &
+        required=.false.,   &
+        act='store',       &
+        def="none",          &
+        choices="none,month,year",  &
+        error=error_cli)
+    if (error_cli/=0) error stop
 
     call cli%add(switch='--nx', &
         switch_ab='-nx',    &
@@ -215,7 +248,7 @@ program main
         act='store',       &
         ! def="1",          &
         error=error_cli)
-    if (error_cli/=0) stop
+    if (error_cli/=0) error stop
 
     call cli%add(switch='--ny', &
         switch_ab='-ny',    &
@@ -224,7 +257,7 @@ program main
         act='store',       &
         ! def="1",          &
         error=error_cli)
-    if (error_cli/=0) stop
+    if (error_cli/=0) error stop
 
     call cli%add(switch='--nz', &
         switch_ab='-nz',    &
@@ -233,7 +266,7 @@ program main
         act='store',       &
         ! def="1",          &
         error=error_cli)
-    if (error_cli/=0) stop
+    if (error_cli/=0) error stop
 
 
     call cli%add(switch='--nslabs', &
@@ -243,7 +276,7 @@ program main
         act='store',       &
         def="2",          &
         error=error_cli)
-    if (error_cli/=0) stop
+    if (error_cli/=0) error stop
 
     call cli%add(switch='--pressurelevels', &
         switch_ab='-pl',    &
@@ -253,12 +286,12 @@ program main
         ! def="70000",          &
         nargs="+", &
         error=error_cli)
-    if (error_cli/=0) stop
+    if (error_cli/=0) error stop
 
     call cli%get(switch='-lf', val=file_list_files, error=error_cli)
-    if (error_cli/=0) stop
+    if (error_cli/=0) error stop
     call cli%get(switch='-po', val=path_outputs, error=error_cli)
-    if (error_cli/=0) stop
+    if (error_cli/=0) error stop
     ! a value that fills the buffer was probably cut
     if (len_trim(file_list_files) == len_path .or. len_trim(path_outputs) == len_path) then
         write(*,'(A,I0,A)') "The paths given in -lf and -po must be shorter than ", len_path, " characters"
@@ -271,23 +304,27 @@ program main
         if (scan(path_outputs(i:i), "/\") == 1 .and. path_outputs(i-1:i-1) /= ":") path_outputs(i:) = " "
     end if
     call cli%get(switch='-tf', val=time_factor, error=error_cli)
-    if (error_cli/=0) stop
+    if (error_cli/=0) error stop
     call cli%get(switch='-etf', val=extra_time_factor_PW, error=error_cli)
-    if (error_cli/=0) stop
+    if (error_cli/=0) error stop
     if (cli%is_passed(switch='-etf')) print *, "Warning: -etf/--extratimefactor is deprecated and ignored &
                                                &(PW24 and PWflux24 are no longer written)"
     call cli%get(switch='-cf', val=coarse_factor, error=error_cli)
-    if (error_cli/=0) stop
+    if (error_cli/=0) error stop
     call cli%get(switch='-rf', val=rem_file, error=error_cli)
-    if (error_cli/=0) stop
+    if (error_cli/=0) error stop
+    call cli%get(switch='-fmt', val=format, error=error_cli)
+    if (error_cli/=0) error stop
+    call cli%get(switch='-sp', val=split, error=error_cli)
+    if (error_cli/=0) error stop
     call cli%get(switch='-nx', val=nx, error=error_cli)
-    if (error_cli/=0) stop
+    if (error_cli/=0) error stop
     call cli%get(switch='-ny', val=ny, error=error_cli)
-    if (error_cli/=0) stop
+    if (error_cli/=0) error stop
     call cli%get(switch='-nz', val=nz, error=error_cli)
-    if (error_cli/=0) stop
+    if (error_cli/=0) error stop
     call cli%get(switch='-ns', val=nslabs, error=error_cli)
-    if (error_cli/=0) stop
+    if (error_cli/=0) error stop
 
 
     allocate(pressure_interslabs(nslabs-1))
@@ -295,7 +332,7 @@ program main
     ! if (nslabs > 2) pressure_interslabs(2) = 60000
 
     call cli%get_varying(switch='-pl', val=pressure_interslabs, error=error_cli)
-    if (error_cli/=0) stop
+    if (error_cli/=0) error stop
     print *, pressure_interslabs
 
     !##########################################################################################!
@@ -318,7 +355,7 @@ program main
         print *, "The number of files is not compatible with the required timefactor&
         &. By default he program expects [n x timefactor + 1 ] files and ignores the last file (n is an integer). &
         & If only [n x timefactor] files are being provided use option 0 for --remfile argument."
-        STOP
+        error stop
     end if
     ! getting basename for outputs from input filename
     ! ppos = scan(trim(filename_list_files),".", BACK= .true.)
@@ -328,7 +365,6 @@ program main
     basename = stem(file_list_files)
     print *, "BASEANAME = ", basename
     prefix_temp = join_path(path_outputs, "tempdata_" // basename // "_")
-    prefix_out = join_path(path_outputs, basename // "_")
 
 #ifdef USE_MPI
     call MPI_INIT(ierror)
@@ -727,28 +763,27 @@ program main
     call MPI_BARRIER(MPI_COMM_WORLD, ierror)
 #endif
     if (process_Rank==0) then
-        open(111,file = prefix_out // trim(vars_out_names(1)) //".dat", &
-                status = "REPLACE", action = "write", access='stream')
-        open(112,file = prefix_out // trim(vars_out_names(2)) //".dat", &
-                status = "REPLACE", action = "write", access='stream')
-        open(113,file = prefix_out // trim(vars_out_names(3)) //".dat", & 
-                status = "REPLACE", action = "write", access='stream')
-        open(114,file = prefix_out // trim(vars_out_names(4)) //".dat", & 
-                status = "REPLACE", action = "write", access='stream')
-        open(115,file = prefix_out // trim(vars_out_names(5)) //".dat", & 
-                status = "REPLACE", action = "write", access='stream')
-    !############################################################################################################!
-    !#######################################  from PWFLUX program ###############################################!
-    !############################################################################################################!
-        open(121,file = prefix_out // trim(var_PWflux) //".dat", &
-                status = "REPLACE", action = "write", access='stream')
-        if (save_density) then
-            open(122,file = prefix_out // trim(var_density) //".dat", &
-                status = "REPLACE", action = "write", access='stream')
+        ! run description for the NetCDF global attributes, and time origin of the outputs
+        info%list_files = trim(file_list_files)
+        info%split = trim(split)
+        info%time_factor = time_factor
+        info%coarse_factor = coarse_factor
+        info%rem_file = rem_file
+        info%pressure_interslabs = pressure_interslabs
+        time_start_str = ""
+        if (format == "nc" .or. split /= "none") then
+            time0_str = read_wrf_time(files_all(1))
+            time0 = parse_datetime(time0_str)
+            info%time_units = "hours since " // time0_str(1:10) // " " // time0_str(12:19)
         end if
-    !############################################################################################################!
-    !##################################### END from PWFLUX program ##############################################!
-    !############################################################################################################!
+        if (format == "nc") call read_lat_lon(files_all(1), nx, ny, coarse_factor, info%lat, info%lon)
+        if (.not. allocated(data_density_out)) then
+            allocate(data_density_out(nx_coarse, ny_coarse, nslabs-1, 1))
+            data_density_out = ieee_value(data_density_out(1,1,1,1), ieee_quiet_nan)
+        end if
+
+        period = ""
+        i_step = 0
         do i_proc = 0,(size_Of_Cluster-1)
             write (*, "('Reading results of processor ',I0, ' and writing to final files')") i_proc
             open(11,  file = prefix_temp // trim(vars_out_names(1)) // "_proc" // & 
@@ -780,42 +815,53 @@ program main
     !############################################################################################################!
     !##################################### END from PWFLUX program ##############################################!
     !############################################################################################################!
-            
-            ! n_chunks = n_chunks_max
-            ! if (i_proc == (size_Of_Cluster-1))    n_chunks = n_chunks_last_processor
-                
+
+            ! the processes have consecutive chunks, so reading them in order gives the output steps in order
             do i_chunk = 1,n_chunks(i_proc+1)
+                i_step = i_step + 1
                 read(11)   data_PW_out
                 read(12)   data_U_out
                 read(13)   data_V_out
                 read(14)   data_What_out
                 read(15)   data_Q_out
-
-                write(111)   data_PW_out
-                write(112)   data_U_out
-                write(113)   data_V_out
-                write(114)   data_What_out
-                write(115)   data_Q_out
-
-    !############################################################################################################!
-    !#######################################  from PWFLUX program ###############################################!
-    !############################################################################################################!
                 read(21)   data_PWflux_out
-                
-                if (.not. cum_per_timestep)  write(121)   data_PWflux_out
-                if (cum_per_timestep)    write(121) data_PWflux_out * (time_factor * nseconds_in_timestep)  
+                if (cum_per_timestep) data_PWflux_out = data_PWflux_out * (time_factor * nseconds_in_timestep)
+                if (save_density) read(22) data_density_out
 
-                if (save_density) then
-                    read(22) data_density_out
-                    write(122) data_density_out
+                ! times of the first and last file of the output step: the step is labelled with the first
+                ! one and, when splitting, both must be in the same period
+                time_step = 0
+                if (format == "nc" .or. split /= "none") then
+                    time_start_str = read_wrf_time(files_all(1 + n_files_by_chunk*(i_step-1)))
+                    time_step = total_seconds(parse_datetime(time_start_str) - time0) / 3600
                 end if
-    !############################################################################################################!
-    !##################################### END from PWFLUX program ##############################################!
-    !############################################################################################################!
+                if (split /= "none") then
+                    time_end_str = read_wrf_time(files_all(n_files_by_chunk*i_step))
+                    if (period_name(time_end_str, split) /= period_name(time_start_str, split)) then
+                        write(*,'(A,I0,A)') "Output step ", i_step, " (" // time_start_str // " to " // &
+                            time_end_str // ") is not within one " // trim(split) // ", so it cannot be split. &
+                            &Every output step must start and end in the same " // trim(split) // &
+                            " (check where the list of files starts and the -rf option)."
+                        error stop
+                    end if
+                end if
+
+                ! a new set of output files for each period
+                if (.not. outputs%is_open .or. period_name(time_start_str, split) /= period) then
+                    call outputs%close()
+                    period = period_name(time_start_str, split)
+                    if (split == "none") then
+                        prefix = join_path(path_outputs, basename)
+                    else
+                        prefix = join_path(path_outputs, basename // "_" // period)
+                    end if
+                    write (*, "('Writing ', A)") prefix // trim(merge(".nc   ", "_*.dat", format == "nc"))
+                    call outputs%create(format, prefix, nx_coarse, ny_coarse, nslabs, info)
+                end if
+                call outputs%write_step(time_step, data_PW_out, data_U_out, data_V_out, data_What_out, &
+                                        data_Q_out, data_PWflux_out, data_density_out)
             end do
 
-
-            ! vars_out_names = (/"PW","U ","V ","W ","Q "/)
             close(11, status = "delete")
             close(12, status = "delete")
             close(13, status = "delete")
@@ -823,16 +869,10 @@ program main
             close(15, status = "delete")
 
             close(21, status = "delete")      ! from PWFLUX program
-            close(22, status = "delete")      ! from PWFLUX program
+            if (save_density) close(22, status = "delete")      ! from PWFLUX program
         end do
 
-        close(111)
-        close(112)
-        close(113)
-        close(114)
-        close(115)
-        close(121)                           ! from PWFLUX program
-        if (save_density)   close(122)       ! from PWFLUX program
+        call outputs%close()
     end if
 
     deallocate(data_U_out)      

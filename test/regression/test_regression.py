@@ -10,9 +10,10 @@ change in results, rerun with --update-reference and commit the new references.
 import numpy as np
 import pytest
 
-from regression import (NX, NY, OUTPUTS, PRESSURE_LEVEL, REFERENCE_CASES, TIME_FACTOR, compare_grid,
-                        output_path, read_output, read_p_lowest_level, read_reference, reference_path,
-                        save_reference)
+from regression import (BASENAME, LIST_SHIFTED, NFILES_USED, NX, NY, OUTPUTS, PRESSURE_LEVEL,
+                        REFERENCE_CASES, TIME_FACTOR, compare_grid, nc_path, output_path, read_nc,
+                        read_output, read_p_lowest_level, read_reference, read_wrf, reference_path,
+                        run_model, save_reference)
 
 NPROCS = 3  # does not divide the 16 output steps, so processes get different numbers of chunks
 
@@ -79,3 +80,99 @@ def test_extra_time_factor_ignored(run_case):
     assert not differing, f"outputs differ with -etf: {differing}"
     assert "deprecated" in (with_etf / "stdout.txt").read_text()
     assert not list(with_etf.glob("*24.dat")), "daily outputs written"
+
+
+# NetCDF output (the default) and --split
+
+NSTEPS = NFILES_USED // TIME_FACTOR
+STEPS_PER_MONTH = {"2018-05": 8, "2018-06": 8}  # 2018-05-31 and 2018-06-01
+
+
+@pytest.mark.parametrize("case", REFERENCE_CASES)
+def test_netcdf_same_as_binary(run_case, case):
+    """Every variable of the NetCDF output equals the binary output, bit for bit."""
+    data, _, _ = read_nc(nc_path(run_case(f"{case}_nc")))
+    binary = run_case(case)
+    for name in OUTPUTS:
+        assert np.array_equal(data[name], read_output(binary, name), equal_nan=True), name
+
+
+def test_netcdf_metadata(run_case):
+    data, attrs, dims = read_nc(nc_path(run_case("pl95000_nc")))
+    assert dims == {"west_east": NX, "south_north": NY, "slab": 2, "interslab": 1, "time": NSTEPS}
+    assert attrs["time"]["units"] == "hours since 2018-05-31 00:00:00"
+    assert np.array_equal(data["time"], np.arange(NSTEPS) * TIME_FACTOR)
+    assert np.array_equal(data["slab"], [1, 2])
+    assert np.array_equal(data["interslab"], [95000.0])
+    assert attrs["slab"]["bounds_description"] == "slab 1: surface to 95000 Pa; slab 2: 95000 Pa to model top"
+    assert np.array_equal(data["XLAT"], read_wrf("XLAT"))
+    assert np.array_equal(data["XLONG"], read_wrf("XLONG"))
+    for name in OUTPUTS:
+        assert attrs[name]["units"] and attrs[name]["long_name"], name
+        assert attrs[name]["coordinates"] == "XLONG XLAT", name
+    assert attrs["global"]["time_factor"] == TIME_FACTOR
+    assert attrs["global"]["split"] == "none"
+    assert np.array_equal(attrs["global"]["pressure_levels_Pa"], 95000.0)
+
+
+def test_netcdf_coarse_lat_lon(run_case):
+    """With -cf 2, XLAT and XLONG are the 2 x 2 block means, like the variables."""
+    data, _, dims = read_nc(nc_path(run_case("pl50000_cf2_nc")))
+    assert (dims["west_east"], dims["south_north"]) == (NX // 2, NY // 2)
+    for var in ["XLAT", "XLONG"]:
+        blocks = read_wrf(var).astype("f8").reshape(NY // 2, 2, NX // 2, 2).mean(axis=(1, 3))
+        assert not compare_grid(data[var][None, None], blocks[None, None]), var
+    binary = run_case("pl50000_cf2")
+    for name in OUTPUTS:
+        assert np.array_equal(data[name], read_output(binary, name, NX // 2, NY // 2), equal_nan=True), name
+
+
+def test_split_month_binary(run_case):
+    """--split month: one set of files per month, which together are the unsplit outputs."""
+    split, whole = run_case("pl50000_month"), run_case("pl50000")
+    assert sorted(f.name for f in split.glob("*.dat")) == sorted(
+        output_path(split, name, period).name for name in OUTPUTS for period in STEPS_PER_MONTH)
+    for name in OUTPUTS:
+        parts = [read_output(split, name, period=period) for period in STEPS_PER_MONTH]
+        assert [len(p) for p in parts] == list(STEPS_PER_MONTH.values()), name
+        assert np.array_equal(np.concatenate(parts), read_output(whole, name), equal_nan=True), name
+
+
+def test_split_month_netcdf(run_case):
+    split = run_case("pl50000_month_nc")
+    whole, _, _ = read_nc(nc_path(run_case("pl50000_nc")))
+    assert sorted(f.name for f in split.glob("*.nc")) == [nc_path(split, p).name for p in STEPS_PER_MONTH]
+    parts = [read_nc(nc_path(split, period)) for period in STEPS_PER_MONTH]
+    for (data, attrs, _), nsteps in zip(parts, STEPS_PER_MONTH.values()):
+        assert len(data["time"]) == nsteps
+        # same time origin in every file, so the times continue
+        assert attrs["time"]["units"] == "hours since 2018-05-31 00:00:00"
+        assert attrs["global"]["split"] == "month"
+    for name in ["time"] + list(OUTPUTS):
+        joined = np.concatenate([data[name] for data, _, _ in parts])
+        assert np.array_equal(joined, whole[name], equal_nan=True), name
+
+
+def test_split_year_netcdf(run_case):
+    """All the steps are in 2018, so --split year gives one file equal to the unsplit one."""
+    split = run_case("pl50000_year_nc")
+    assert [f.name for f in split.glob("*.nc")] == [f"{BASENAME}_2018.nc"]
+    data, _, _ = read_nc(nc_path(split, "2018"))
+    whole, _, _ = read_nc(nc_path(run_case("pl50000_nc")))
+    for name in ["time"] + list(OUTPUTS):
+        assert np.array_equal(data[name], whole[name], equal_nan=True), name
+
+
+def test_split_step_across_boundary_fails(exe, inputs):
+    """Starting at 01:00, the output step 2018-05-31 22:00 .. 2018-06-01 00:00 is in two
+    months: --split month must stop with an error, without --split it runs."""
+    _, error = run_model(exe, inputs, "shifted_month", ["-pl", "50000", "-sp", "month"],
+                         list_name=LIST_SHIFTED, rem_file=0)
+    assert error is not None and "is not within one month" in error
+    _, error = run_model(exe, inputs, "shifted_none", ["-pl", "50000"], list_name=LIST_SHIFTED, rem_file=0)
+    assert error is None, error
+
+
+def test_invalid_option_value_fails(exe, inputs):
+    _, error = run_model(exe, inputs, "bad_format", ["-pl", "50000", "-fmt", "grib"])
+    assert error is not None and "exit 0" not in error

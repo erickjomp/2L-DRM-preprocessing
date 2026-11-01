@@ -74,6 +74,78 @@ contains
         if (i_dot > 1) base = base(:i_dot-1)
     end function stem
 
+    ! first time of a wrfout file (variable Times), as "YYYY-MM-DD_hh:mm:ss"
+    function read_wrf_time(file) result(time_str)
+        use netcdf, only: nf90_open, nf90_close, nf90_inq_varid, nf90_get_var, nf90_nowrite
+        character(len=*), intent(in) :: file
+        character(len=19)            :: time_str
+        integer                      :: ncid, varid
+
+        call nc_check(nf90_open(trim(file), nf90_nowrite, ncid), trim(file))
+        call nc_check(nf90_inq_varid(ncid, "Times", varid), trim(file) // ": Times")
+        call nc_check(nf90_get_var(ncid, varid, time_str, start=[1, 1], count=[19, 1]), trim(file) // ": Times")
+        call nc_check(nf90_close(ncid), trim(file))
+    end function read_wrf_time
+
+    ! parses "YYYY-MM-DD_hh:mm:ss" (WRF Times), as in 2L-DRM
+    function parse_datetime(str) result(dt)
+        use stdlib_datetime, only: datetime_type, datetime
+        character(len=*), intent(in) :: str
+        type(datetime_type)          :: dt
+        character(len=len(str))      :: buffer
+        integer                      :: year, month, day, hour, minute, second, ios, i
+
+        buffer = str
+        do i = 1, len(buffer)
+            if (index("-_:", buffer(i:i)) > 0) buffer(i:i) = " "
+        end do
+        read(buffer, *, iostat=ios) year, month, day, hour, minute, second
+        if (ios /= 0) then
+            write(*,*) "Invalid datetime '", trim(str), "'. Expected format: YYYY-MM-DD_hh:mm:ss"
+            error stop
+        end if
+        dt = datetime(year, month, day, hour, minute, second)
+    end function
+
+    ! period of a time "YYYY-MM-DD_hh:mm:ss" for --split: "YYYY-MM", "YYYY" or ""
+    function period_name(time_str, split) result(period)
+        character(len=*), intent(in)  :: time_str, split
+        character(len=:), allocatable :: period
+
+        select case (trim(split))
+        case ("month")
+            period = time_str(1:7)
+        case ("year")
+            period = time_str(1:4)
+        case default
+            period = ""
+        end select
+    end function period_name
+
+    ! XLAT and XLONG of a wrfout file, coarsened like the outputs; lat and lon are
+    ! allocated as (nx/coarse_factor, ny/coarse_factor)
+    subroutine read_lat_lon(file, nx, ny, coarse_factor, lat, lon)
+        use netcdf, only: nf90_open, nf90_close, nf90_inq_varid, nf90_get_var, nf90_nowrite
+        use mod_transforming, only: coarsen_xy_grid
+        character(len=*), intent(in)         :: file
+        integer, intent(in)                  :: nx, ny, coarse_factor
+        real(4), allocatable, intent(out)    :: lat(:,:), lon(:,:)
+        real(4)                              :: fine(nx, ny, 1, 1), coarse(nx/coarse_factor, ny/coarse_factor, 1, 1)
+        character(len=5), parameter          :: names(2) = ["XLAT ", "XLONG"]
+        integer                              :: ncid, varid, i
+
+        call nc_check(nf90_open(trim(file), nf90_nowrite, ncid), trim(file))
+        do i = 1, 2
+            call nc_check(nf90_inq_varid(ncid, trim(names(i)), varid), trim(file) // ": " // trim(names(i)))
+            call nc_check(nf90_get_var(ncid, varid, fine, start=[1, 1, 1], count=[nx, ny, 1]), &
+                          trim(file) // ": " // trim(names(i)))
+            call coarsen_xy_grid(fine, coarse, nx, ny, 1, 1, coarse_factor)
+            if (i == 1) lat = coarse(:,:,1,1)
+            if (i == 2) lon = coarse(:,:,1,1)
+        end do
+        call nc_check(nf90_close(ncid), trim(file))
+    end subroutine read_lat_lon
+
     ! stops with the NetCDF error message if status is not nf90_noerr
     subroutine nc_check(status, context)
         use netcdf, only: nf90_noerr, nf90_strerror
