@@ -69,14 +69,19 @@ contains
     ! - LH: LH / Lv, with Lv (J kg-1) from the temperature var_temp (Bringfelt, 1986, Test
     !   of a forest evapotranspiration model, SMHI), as the former python program;
     !   2-3 % more than QFX at 296-302 K
+    ! temp is only needed with et_from LH, and et_coarse with coarse_factor > 1 (an
+    ! unallocated array can be passed for them: it is not present)
     subroutine add_evap_rate(ncid, file, et_from, var_qfx, var_lh, var_temp, nx, ny, coarse_factor, et_sum, &
                              rate, temp, et_coarse)
         integer, intent(in)           :: ncid
         character(len=*), intent(in)  :: file, et_from, var_qfx, var_lh, var_temp
         integer, intent(in)           :: nx, ny, coarse_factor
         real(8), intent(inout)        :: et_sum(nx/coarse_factor, ny/coarse_factor)
-        real(4), intent(out)          :: rate(nx, ny), temp(nx, ny)      ! work arrays
-        real(4), intent(out)          :: et_coarse(nx/coarse_factor, ny/coarse_factor)
+        real(4), intent(out)          :: rate(nx, ny)                                       ! work arrays
+        real(4), intent(out), optional :: temp(nx, ny), et_coarse(nx/coarse_factor, ny/coarse_factor)
+
+        if ((et_from /= "QFX" .and. .not. present(temp)) .or. (coarse_factor > 1 .and. .not. present(et_coarse))) &
+            error stop "add_evap_rate: work array temp or et_coarse missing"
 
         if (et_from == "QFX") then
             call read_2d(var_qfx, rate)

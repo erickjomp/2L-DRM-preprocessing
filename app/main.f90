@@ -542,7 +542,10 @@ program main
     end if
     ! PP and ET: only 2-D arrays
     if (with_pp_et) then
-        allocate(work_2d_a(nx, ny), work_2d_b(nx, ny), work_2d_int(nx, ny), work_2d_coarse(nx_coarse, ny_coarse))
+        allocate(work_2d_a(nx, ny), work_2d_int(nx, ny))
+        ! only when used, otherwise not present in add_evap_rate
+        if (et_from == "LH") allocate(work_2d_b(nx, ny))
+        if (coarse_factor > 1) allocate(work_2d_coarse(nx_coarse, ny_coarse))
         allocate(et_sum(nx_coarse, ny_coarse), rain_start(nx_coarse, ny_coarse), rain_end(nx_coarse, ny_coarse))
         allocate(data_PP_out(nx_coarse, ny_coarse), data_ET_out(nx_coarse, ny_coarse))
     else
@@ -814,7 +817,9 @@ program main
     if (with_pp_et) then
         close(23)
         close(24)
-        deallocate(work_2d_a, work_2d_b, work_2d_int, work_2d_coarse, et_sum, rain_start, rain_end)
+        deallocate(work_2d_a, work_2d_int, et_sum, rain_start, rain_end)
+        if (allocated(work_2d_b)) deallocate(work_2d_b)
+        if (allocated(work_2d_coarse)) deallocate(work_2d_coarse)
     end if
 
     ! CLOSING raw data to store
