@@ -79,7 +79,7 @@ def expected_regions(case, cf, keep_ocean):
 def run(case, name, target, *args, field=("--field", "ID")):
     prefix = case["dir"] / name
     make_regions.main(["--source_regions", str(case["shp"]), *field, "--target_region", *target,
-                       "--wrf", str(case["wrf"]), "--prefix", str(prefix), *args])
+                       "--wrf", str(case["wrf"]), "--prefix", str(prefix), "--format", "bin", *args])
     regions = np.fromfile(f"{prefix}_regions.dat", np.float32)
     il = np.fromfile(f"{prefix}_il.dat", np.float32).astype(int)
     jl = np.fromfile(f"{prefix}_jl.dat", np.float32).astype(int)
@@ -147,3 +147,20 @@ def test_bad_target(case, target):
     with pytest.raises(SystemExit) as error:
         run(case, "bad", target)
     assert "--target_region" in str(error.value)
+
+
+@pytest.mark.parametrize("target", [["1", "3"], "shapefile"])
+def test_netcdf(case, target):
+    """--format nc (default): same regions and target as the binary files, with XLAT, XLONG"""
+    target = [str(case["target_shp"])] if target == "shapefile" else target
+    regions, il, jl = run(case, "bin_for_nc", target, "-cf", "2")
+    prefix = case["dir"] / "nc"
+    make_regions.main(["-sr", str(case["shp"]), "-f", "ID", "-tr", *target, "--wrf", str(case["wrf"]),
+                       "--prefix", str(prefix), "-cf", "2"])
+    lat, lon, _ = grid(case, 2)
+    with netCDF4.Dataset(f"{prefix}_regions.nc") as nc:
+        assert np.array_equal(nc["regions"][:], regions.reshape(lat.shape))
+        assert np.array_equal(nc["target"][:], target_mask(lat.shape, il, jl))
+        assert "target_i" not in nc.variables  # the mask only
+        assert np.allclose(nc["XLAT"][:], lat) and np.allclose(nc["XLONG"][:], lon)
+        assert nc.nregions == 4 and nc.domsize == len(il) and nc.coarse_factor == 2

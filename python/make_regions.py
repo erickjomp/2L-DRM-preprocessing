@@ -1,18 +1,24 @@
 """Source regions and target region of 2L-DRM from shapefiles, on the grid of the WRF files.
 
     python make_regions.py --source_regions basins.shp [--field ID] --target_region 1 3 \
-        --wrf wrfout_d01_2018-05-01_00:00:00 --prefix inputs/amazon [--coarse_factor 2] [--keep_ocean]
+        --wrf wrfout_d01_2018-05-01_00:00:00 --prefix inputs/amazon [--coarse_factor 2] [--keep_ocean] \
+        [--format bin]
     python make_regions.py --source_regions countries.shp --field ID --target_region la_plata.shp ...
 
-Writes, as 2L-DRM reads them (float32, Fortran order (nx, ny), i.e. numpy (ny, nx)):
-- <prefix>_regions.dat: map of the source regions. The region of a cell is the --field value
-  of the polygon of --source_regions that contains its center (1 for every polygon without
-  --field), and nregions = (largest region) + 1 for the cells outside the polygons and,
-  without --keep_ocean, over the ocean (LANDMASK and LAKEMASK both 0).
+The source regions: the region of a cell is the --field value of the polygon of
+--source_regions that contains its center (1 for every polygon without --field), and
+nregions = (largest region) + 1 for the cells outside the polygons and, without --keep_ocean,
+over the ocean (LANDMASK and LAKEMASK both 0).
+The target region: --target_region is either region numbers of --source_regions, or a
+shapefile, independent of the source regions: the cells whose center is inside any of its
+polygons (without the ocean, unless --keep_ocean).
+
+Writes, with --format nc (default), <prefix>_regions.nc with the map of the source regions,
+the mask of the target region (on the same grid), XLAT and XLONG; with
+--format bin, the files 2L-DRM reads (float32, Fortran order (nx, ny), i.e. numpy (ny, nx)):
+- <prefix>_regions.dat: map of the source regions
 - <prefix>_il.dat, <prefix>_jl.dat: x and y indices of the target-region cells, 1-based as the
-  Fortran indices of 2L-DRM. --target_region is either region numbers of --source_regions,
-  or a shapefile, independent of the source regions: the cells whose center is inside any
-  of its polygons (without the ocean, unless --keep_ocean).
+  Fortran indices of 2L-DRM.
 It prints nx, ny, nregions and the number of target cells (domsize), which 2L-DRM needs.
 
 The grid is that of prepro2LDRM-slabvars with the same --coarse_factor: XLAT and XLONG
@@ -22,6 +28,7 @@ do not fill a block are dropped); a coarse cell is land if at least half of its 
 Needs numpy, netCDF4, geopandas and regionmask.
 """
 import argparse
+import datetime
 import sys
 from pathlib import Path
 
@@ -104,6 +111,44 @@ def target_cells(target_region, regions, nregions, lat, lon, land):
     return target, f"cells inside {target_region[0]}"
 
 
+def write_nc(file, regions, nregions, target, lat, lon, args, target_desc):
+    """regions, target region, XLAT and XLONG in one NetCDF file, as the outputs of
+    prepro2LDRM-slabvars"""
+    ny, nx = regions.shape
+    with netCDF4.Dataset(file, "w") as nc:
+        nc.createDimension("west_east", nx)
+        nc.createDimension("south_north", ny)
+        dims = ("south_north", "west_east")
+        for name, data, long_name, units in [("XLAT", lat, "latitude", "degree_north"),
+                                             ("XLONG", lon, "longitude", "degree_east")]:
+            var = nc.createVariable(name, "f4", dims)
+            var.long_name, var.units = long_name, units
+            var[:] = data
+        var = nc.createVariable("regions", "i4", dims, zlib=True)
+        var.long_name = "source region"
+        var.description = (f"source region of the cell, from {args.source_regions}"
+                           + (f" (field {args.field})" if args.field else " (1 for all its polygons)")
+                           + f"; {nregions}: outside the polygons" + ("" if args.keep_ocean else " or over the ocean"))
+        var.coordinates = "XLONG XLAT"
+        var[:] = regions
+        var = nc.createVariable("target", "i1", dims, zlib=True)
+        var.long_name = "target region"
+        var.description = f"1 for the cells of the target region ({target_desc}), 0 elsewhere"
+        var.coordinates = "XLONG XLAT"
+        var[:] = target.astype(np.int8)
+        nc.title = "2L-DRM source and target regions"
+        nc.source = "make_regions.py of prepro2LDRM-slabvars, https://github.com/erickjomp/2L-DRM-preprocessing"
+        nc.nregions = np.int32(nregions)
+        nc.domsize = np.int32(target.sum())
+        nc.source_regions = str(args.source_regions)
+        nc.field = args.field or ""
+        nc.target_region = " ".join(args.target_region)
+        nc.wrf_file = str(args.wrf)
+        nc.coarse_factor = np.int32(args.coarse_factor)
+        nc.keep_ocean = np.int32(args.keep_ocean)
+        nc.history = "created " + datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--source_regions", "-sr", required=True, type=Path,
@@ -117,6 +162,8 @@ def main(argv=None):
     parser.add_argument("--prefix", required=True, help="prefix of the output files, e.g. inputs/amazon")
     parser.add_argument("--coarse_factor", "-cf", type=int, default=1, help="as in prepro2LDRM-slabvars (default 1)")
     parser.add_argument("--keep_ocean", action="store_true", help="keep the ocean cells in the regions and the target")
+    parser.add_argument("--format", "-fmt", choices=["nc", "bin"], default="nc",
+                        help="nc (default): <prefix>_regions.nc; bin: the .dat files that 2L-DRM reads")
     args = parser.parse_args(argv)
 
     lat, lon, land = read_grid(args.wrf, args.coarse_factor, args.keep_ocean)
@@ -128,12 +175,16 @@ def main(argv=None):
 
     prefix = Path(args.prefix)
     prefix.parent.mkdir(parents=True, exist_ok=True)
-    regions.astype(np.float32).tofile(f"{prefix}_regions.dat")
-    (il + 1).astype(np.float32).tofile(f"{prefix}_il.dat")
-    (jl + 1).astype(np.float32).tofile(f"{prefix}_jl.dat")
+    if args.format == "nc":
+        write_nc(f"{prefix}_regions.nc", regions, nregions, target, lat, lon, args, target_desc)
+        print(f"Written {prefix}_regions.nc")
+    else:
+        regions.astype(np.float32).tofile(f"{prefix}_regions.dat")
+        (il + 1).astype(np.float32).tofile(f"{prefix}_il.dat")
+        (jl + 1).astype(np.float32).tofile(f"{prefix}_jl.dat")
+        print(f"Written {prefix}_regions.dat, {prefix}_il.dat, {prefix}_jl.dat")
 
     ny, nx = regions.shape
-    print(f"Written {prefix}_regions.dat, {prefix}_il.dat, {prefix}_jl.dat")
     print(f"Target region: {target_desc}")
     print(f"nx = {nx}, ny = {ny}, nregions = {nregions}, domsize (target cells) = {target.sum()}")
 
