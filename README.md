@@ -120,14 +120,10 @@ The Windows builds are run in the GitHub Actions workflow, but have not been che
 
 Add `--serial` for a serial build, and `--mpiexec PATH` if `mpiexec` is not in PATH. After an intended change in the results, rerun with `--update-reference` and commit the new references. The tests also run on GitHub Actions (`.github/workflows/tests.yml`) for each push.
 
-### keeling
+### Troubleshooting
 
-The default gfortran (11) cannot compile FLAP; use the gcc-toolset-13 one with the system Open MPI and NetCDF-Fortran:
-
-    module load mpi/openmpi-x86_64
-    fpm build --profile release --compiler /opt/rh/gcc-toolset-13/root/usr/bin/gfortran --flag "$(nf-config --fflags)"
-
-On the login node, MPI runs need `export OMPI_MCA_pml=ob1` (the default UCX transport fails there with "Connection refused"); the tests set it. Jobs on the compute nodes do not need it. The tests also let Open MPI start more processes than there are cores.
+- If the system gfortran is older than 12 (FLAP does not compile), give a newer one with `--compiler /path/to/gfortran`, in the build and the test commands.
+- If Open MPI runs fail with "Connection refused" on a machine without a network fabric (e.g. a cluster login node), use its shared-memory transport: `export OMPI_MCA_pml=ob1`. The tests set it, and also let Open MPI start more processes than there are cores.
 
 
 ## Notes
