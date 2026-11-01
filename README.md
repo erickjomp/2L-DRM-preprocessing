@@ -135,20 +135,18 @@ The Windows builds are run in the GitHub Actions workflow, but have not been che
 
 The Python program `prepro2LDRM-regions` (`python/prepro2LDRM_regions.py`) writes the fixed inputs of 2L-DRM, the source regions and the target region, from shapefiles, on the grid of the WRF files (with the same `--coarse_factor` as `prepro2LDRM-metdata`). The target region is either some of the source regions (their numbers) or any other shapefile:
 
-    prepro2LDRM-regions --source_regions amazon_basin.shp --target_region 1 --wrf wrfout_d01_2018-05-01_00:00:00 --prefix inputs/amazon --format bin
-    prepro2LDRM-regions --source_regions countries.shp --field ID --target_region la_plata_basin.shp --wrf ... --prefix inputs/la_plata
+    python python/prepro2LDRM_regions.py --source_regions amazon_basin.shp --target_region 1 --wrf wrfout_d01_2018-05-01_00:00:00 --prefix inputs/amazon --format bin
+    python python/prepro2LDRM_regions.py --source_regions countries.shp --field ID --target_region la_plata_basin.shp --wrf ... --prefix inputs/la_plata
 
 The source region of each cell is the `--field` value of its polygon (1 for all polygons without `--field`), and the largest region + 1 outside the polygons and over the ocean (unless `--keep_ocean`); the target region has no ocean cells either (unless `--keep_ocean`). It prints nregions and domsize, and writes:
 - `--format nc` (default): `<prefix>_regions.nc`, with the map of the source regions (`regions`), the mask of the target region (`target`), XLAT and XLONG, on the same grid as the NetCDF outputs of `prepro2LDRM-metdata`.
 - `--format bin`: the files that 2L-DRM reads (it does not read NetCDF): `<prefix>_regions.dat`, `<prefix>_target.dat` (the mask of the target region, 1 inside and 0 outside), and `<prefix>_il.dat`, `<prefix>_jl.dat`, the x and y indices of the target-region cells (2L-DRM reads the target region as this list of cells). The indices are 1-based, the Fortran indices used by 2L-DRM: the target files of the former notebooks were 0-based, which 2L-DRM read as the cells one row south and one column west.
 
-It needs Python 3.9 or newer with numpy, netCDF4, geopandas and regionmask. To install it as the command `prepro2LDRM-regions`, from the directory of this repository:
+It needs Python with numpy, netCDF4, geopandas and regionmask:
 
-    python -m pip install .
+    python -m pip install numpy netCDF4 geopandas regionmask
 
-which also installs the packages that are missing. In a conda environment, install them with conda first (`conda install -c conda-forge numpy netcdf4 geopandas regionmask`), so that pip does not mix in its own builds. The command is then in the PATH whenever that environment is active (pip puts it in its `bin`, or `Scripts` on Windows); `pip install -e .` instead keeps it linked to the repository, so that changes in `python/prepro2LDRM_regions.py` apply without reinstalling. Without installing it, `python python/prepro2LDRM_regions.py` runs the same program.
-
-`prepro2LDRM-regions --help` gives its options.
+and `python python/prepro2LDRM_regions.py --help` gives its options.
 
 
 ## Tests
