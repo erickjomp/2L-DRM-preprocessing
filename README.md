@@ -118,7 +118,7 @@ The Windows builds are run in the GitHub Actions workflow, but have not been che
     python -m pip install numpy netCDF4 pytest
     python -m pytest test/regression --exe $(fpm run prepro2LDRM-slabvars --profile release --flag "$(nf-config --fflags)" --runner echo | tail -1)
 
-Add `--serial` for a serial build, and `--mpiexec PATH` if `mpiexec` is not in PATH. After an intended change in the results, rerun with `--update-reference` and commit the new references. The tests also run on GitHub Actions (`.github/workflows/tests.yml`) for each push.
+Add `--serial` for a serial build, and `--mpiexec PATH` if `mpiexec` is not in PATH. `python -m pytest test/python` tests `python/make_regions.py` (it also needs geopandas and regionmask). After an intended change in the results, rerun with `--update-reference` and commit the new references. The tests also run on GitHub Actions (`.github/workflows/tests.yml`) for each push.
 
 ### Troubleshooting
 
@@ -137,7 +137,12 @@ Add `--serial` for a serial build, and `--mpiexec PATH` if `mpiexec` is not in P
 
 ## Additional binary files required by 2L-DRM
 - Precipitation (PP) and evapotranspiration (ET) are now written by this program (see Outputs). The former python programs are kept in `other/PP-ET_programs` for reference.
-- Other scripts for additional 2L-DRM inputs can be found in `other/additional_scripts`
+- Source regions and target region: `python/make_regions.py` makes them from a shapefile, on the grid of the WRF files (with the same `--coarse_factor` as this program):
+
+      python python/make_regions.py --shapefile amazon_basin.shp --wrf wrfout_d01_2018-05-01_00:00:00 --prefix inputs/amazon
+
+  It writes `amazon_regions.dat` (the region of each cell: the `--field` value of its polygon, 1 for all polygons without `--field`, and the largest region + 1 outside the polygons and over the ocean, unless `--keep_ocean`), and `amazon_il.dat`, `amazon_jl.dat` (the x and y indices of the target-region cells, all the regions or those of `--target`), and prints nregions and domsize. The indices are 1-based, the Fortran indices used by 2L-DRM: the target files of the former notebooks were 0-based, which 2L-DRM read as the cells one row south and one column west. It needs numpy, netCDF4, geopandas and regionmask (`python -m pip install numpy netCDF4 geopandas regionmask`).
+- The topography mask and the former notebooks are in `other/additional_scripts`.
 
 ## References
 - Claros, E., Dominguez, F., & Liu, C. (2025). Moisture sources of precipitation using convection-permitting simulations: A study over South America. Geophysical Research Letters, 52, e2025GL118806. https://doi.org/10.1029/2025GL118806
