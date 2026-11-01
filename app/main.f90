@@ -54,7 +54,7 @@ program main
     real(4), dimension(:,:,:,:), allocatable     :: data_U_coarse, data_V_coarse, data_PW_coarse, data_Q_coarse, data_What_coarse
     real(4), dimension(:,:,:,:), allocatable     :: data_U_out, data_V_out, data_PW_out, data_Q_out, data_What_out
     integer                                      :: extra_time_factor_PW  ! deprecated -etf, ignored
-    real(4)                                      :: startTime,stopTime
+    integer(8)                                   :: clock_start, clock_end, clock_rate  ! wall-clock time
     integer                                      :: i_file, n_files_by_chunk, i_chunk, n_all_chunks, counter_chunk
     character(len=50), dimension(5)              :: vars_out_names
     ! real(4), dimension(:), allocatable           :: o
@@ -94,7 +94,7 @@ program main
     real(4)                                      :: Rd, kappa, P0                    ! from PWFLUX program
 
 
-    call cpu_time(startTime)
+    call system_clock(clock_start, clock_rate)
 
     !##########################################################################################!
     !!!!!!!########################## INPUTS (modify herre) ##########################!!!!!!!!!!
@@ -1049,10 +1049,11 @@ program main
 
     
 
-    call cpu_time(stopTime)
+    call system_clock(clock_end)
 
 
-    write(*, '(A, F8.4)') 'Elapsed time, hr : ',  (stopTime - startTime)/(60*60)
+    if (process_Rank == 0) write(*, '(A, F8.4)') 'Elapsed time, hr : ', &
+        real(clock_end - clock_start) / clock_rate / (60*60)
 
 contains
 
