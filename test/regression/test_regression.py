@@ -13,7 +13,7 @@ import netCDF4
 import numpy as np
 import pytest
 
-from regression import (BASENAME, LIST_SHIFTED, NFILES_USED, NO_PP_ET, NX, NY, OUTPUTS, PRESSURE_LEVEL,
+from regression import (BASENAME, LIST_NAME, LIST_SHIFTED, NFILES_USED, NO_PP_ET, NX, NY, OUTPUTS, PRESSURE_LEVEL,
                         REFERENCE_CASES, SLAB_OUTPUTS, SURFACE_OUTPUTS, TIME_FACTOR, compare_grid,
                         et_from_wrf, nc_path, output_path, pp_from_wrf, prepare_inputs, read_nc, read_output,
                         read_p_lowest_level, read_reference, read_wrf, reference_path, run_model,
@@ -227,6 +227,21 @@ def test_remfile_1(exe, inputs, run_case):
     assert np.array_equal(read_output(outdir, "PP"), read_output(run_case("pl50000"), "PP"))
     errors = compare_grid(read_output(outdir, "ET"), et_from_wrf(first_file=1))
     assert not errors, "\n".join(errors)
+
+
+def test_list_comments_blank_lines(exe, inputs, run_case):
+    """The list of files can have # comments, blank lines, leading blanks and Windows line
+    endings: same outputs as the plain list."""
+    files = (inputs / LIST_NAME).read_text().split()
+    lines = ["# WRF files of the test case", ""] + ["  " + f for f in files[:5]] + ["", "# rest"] + files[5:] + [""]
+    (inputs / "wrf_files_messy.txt").write_bytes("\r\n".join(lines).encode())
+    outdir, error = run_model(exe, inputs, "list_messy", ["-pl", "50000", "-fmt", "bin"],
+                              list_name="wrf_files_messy.txt")
+    assert error is None, error
+    full = run_case("pl50000")
+    for name in OUTPUTS:
+        assert (output_path(outdir, name, basename="wrf_files_messy").read_bytes()
+                == output_path(full, name).read_bytes()), name
 
 
 def test_no_pp_et(exe, inputs, run_case):

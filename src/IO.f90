@@ -20,31 +20,43 @@ contains
         character(len=:), allocatable :: files_temp(:)
 
         open(newunit=iun, file=text_file, form="formatted", status = "old")
-        ! count number of records and find the longest one
+        ! count the files (blank lines and lines starting with # are skipped) and find the
+        ! longest name
         nrecs = 0
         max_len = 1
+        i = 0
         count_loop: do
             read(iun, '(a)', iostat=istat) buffer
             if (istat /= 0) exit count_loop
-            nrecs = nrecs+1
+            i = i + 1
             ! a line that fills the buffer was probably cut
             if (len_trim(buffer) == len_path) then
-                write(*,'(A,I0,A,I0,A)') "Line ", nrecs, " of " // trim(text_file) // " has ", len_path, &
+                write(*,'(A,I0,A,I0,A)') "Line ", i, " of " // trim(text_file) // " has ", len_path, &
                                          " characters or more"
                 error stop
             end if
+            call clean_line(buffer)
+            if (len_trim(buffer) == 0) cycle
+            nrecs = nrecs+1
             max_len = max(max_len, len_trim(buffer))
         end do count_loop
+        if (nrecs == 0) then
+            write(*,'(A)') "No WRF files in " // trim(text_file)
+            error stop
+        end if
 
         allocate(character(len=max_len) :: files(nrecs))
         rewind(iun)
-        read_loop: do i=1,nrecs
+        i = 0
+        read_loop: do while (i < nrecs)
             read(iun,'(a)', iostat=istat) buffer
-            ! print *,buffer
             if (istat /= 0) then
-                print *,' error while reading text file'
-                exit read_loop
+                write(*,'(A)') "Error while reading " // trim(text_file)
+                error stop
             end if
+            call clean_line(buffer)
+            if (len_trim(buffer) == 0) cycle
+            i = i + 1
             files(i) = trim(buffer)
         end do read_loop
         close(iun)
@@ -61,6 +73,22 @@ contains
             end if
             call move_alloc(files_temp, files)
         end if
+
+    contains
+
+        ! line of the list without leading blanks and a carriage return at the end (list
+        ! written on Windows); blank if it is a comment (#)
+        subroutine clean_line(line)
+            character(len=*), intent(inout) :: line
+            integer                         :: n
+
+            line = adjustl(line)
+            n = len_trim(line)
+            if (n > 0) then
+                if (line(n:n) == achar(13)) line(n:n) = " "
+            end if
+            if (line(1:1) == "#") line = ""
+        end subroutine clean_line
     end subroutine
 
     ! file name without directory and extension; both / and backslash are directory

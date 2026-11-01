@@ -26,6 +26,18 @@ Once installed, please use:
 
 for more information about the options and arguments of this preprocessing program.
 
+## List of WRF files
+
+The WRF files are given with `--listfiles` (`-lf`): a text file with one path per line, absolute or relative to the directory where the program runs, in time order (the program does not sort them). Blank lines and lines starting with `#` are skipped. The list can be made with, on Linux:
+
+    ls /path/to/wrfout/wrfout_d01_2018-0[5-9]* > AMZ2_CPM01.txt
+
+and on Windows (PowerShell; `Set-Content -Encoding ascii` and not `>`, which writes UTF-16 in Windows PowerShell 5):
+
+    (Get-ChildItem C:\path\to\wrfout\wrfout_d01_2018-0[5-9]* | Sort-Object Name).FullName | Set-Content -Encoding ascii AMZ2_CPM01.txt
+
+Both sort by name, which is time order for the WRF file names. A single list covers the whole run, also with `--split` (see Outputs).
+
 
 ## Outputs
 

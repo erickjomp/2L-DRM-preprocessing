@@ -179,7 +179,8 @@ program main
                   help = "Usage: mpirun [mpirun_optional_arguments] (no mpirun needed for a serial build) ")
     call cli%add(switch='--listfiles', &
                  switch_ab='-lf',    &
-                 help='Text file containing the list of WRF output files to read. &
+                 help='Text file containing the list of WRF output files to read, one per line &
+                    &in time order (blank lines and lines starting with # are skipped). &
                     &The number of files should be [n x timefactor + 1], where n is an integer. &
                     &For other options see the --remfile option. ',   &
                  required=.true.,   &
