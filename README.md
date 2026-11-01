@@ -137,11 +137,12 @@ Add `--serial` for a serial build, and `--mpiexec PATH` if `mpiexec` is not in P
 
 ## Additional binary files required by 2L-DRM
 - Precipitation (PP) and evapotranspiration (ET) are now written by this program (see Outputs). The former python programs are kept in `other/PP-ET_programs` for reference.
-- Source regions and target region: `python/make_regions.py` makes them from a shapefile, on the grid of the WRF files (with the same `--coarse_factor` as this program):
+- Source regions and target region: `python/make_regions.py` makes them from shapefiles, on the grid of the WRF files (with the same `--coarse_factor` as this program). The target region is either some of the source regions (their numbers) or any other shapefile:
 
-      python python/make_regions.py --shapefile amazon_basin.shp --wrf wrfout_d01_2018-05-01_00:00:00 --prefix inputs/amazon
+      python python/make_regions.py --source_regions amazon_basin.shp --target_region 1 --wrf wrfout_d01_2018-05-01_00:00:00 --prefix inputs/amazon
+      python python/make_regions.py --source_regions countries.shp --field ID --target_region la_plata_basin.shp --wrf ... --prefix inputs/la_plata
 
-  It writes `amazon_regions.dat` (the region of each cell: the `--field` value of its polygon, 1 for all polygons without `--field`, and the largest region + 1 outside the polygons and over the ocean, unless `--keep_ocean`), and `amazon_il.dat`, `amazon_jl.dat` (the x and y indices of the target-region cells, all the regions or those of `--target`), and prints nregions and domsize. The indices are 1-based, the Fortran indices used by 2L-DRM: the target files of the former notebooks were 0-based, which 2L-DRM read as the cells one row south and one column west. It needs numpy, netCDF4, geopandas and regionmask (`python -m pip install numpy netCDF4 geopandas regionmask`).
+  It writes `<prefix>_regions.dat` (the source region of each cell: the `--field` value of its polygon, 1 for all polygons without `--field`, and the largest region + 1 outside the polygons and over the ocean, unless `--keep_ocean`), and `<prefix>_il.dat`, `<prefix>_jl.dat` (the x and y indices of the target-region cells, without the ocean unless `--keep_ocean`), and prints nregions and domsize. The indices are 1-based, the Fortran indices used by 2L-DRM: the target files of the former notebooks were 0-based, which 2L-DRM read as the cells one row south and one column west. It needs numpy, netCDF4, geopandas and regionmask (`python -m pip install numpy netCDF4 geopandas regionmask`).
 - The topography mask and the former notebooks are in `other/additional_scripts`.
 
 ## References
