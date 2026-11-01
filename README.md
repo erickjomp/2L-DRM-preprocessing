@@ -48,15 +48,17 @@ Then you can clone this repository in a local directory:
 
     git clone https://github.com/erickjomp/2L-DRM-preprocessing.git
 
-And you can build the program giving the directory of the `netcdf` module, which `nf-config` prints:
+And you can build the program with the `release` profile (optimized), giving the directory of the `netcdf` module, which `nf-config` prints:
 
-    fpm build --flag "$(nf-config --fflags)"
+    fpm build --profile release --flag "$(nf-config --fflags)"
+
+Without `--profile release`, fpm uses its `debug` profile (no optimization, with run-time checks), which is much slower. The `--flag` is needed when the `netcdf` module is not in the compiler's default search path, as on RHEL-based systems (`/usr/lib64/gfortran/modules`) or conda; it does no harm elsewhere.
 
 If the NetCDF libraries are not found when linking, add their directory, e.g. `--link-flag "-L/path/to/netcdf/lib"`. A specific compiler is chosen with `--compiler`, e.g. `--compiler gfortran-13`.
 
-And install it using (with the same flags as in `fpm build`):
+And install it using (with the same options as in `fpm build`):
 
-    fpm install --flag "$(nf-config --fflags)"
+    fpm install --profile release --flag "$(nf-config --fflags)"
 
 In addition, if using a Linux system, you may want to add `~/.local/bin/` to your PATH environment. For that, you can edit your `~/.profile` file by adding a line like this:
 
@@ -73,7 +75,7 @@ To build without MPI, remove `USE_MPI` from `macros` in the `[preprocess.cpp]` s
 The simplest way is [MSYS2](https://www.msys2.org) (UCRT64 environment):
 
     pacman -S git mingw-w64-ucrt-x86_64-gcc-fortran mingw-w64-ucrt-x86_64-netcdf-fortran mingw-w64-ucrt-x86_64-fpm
-    fpm build --flag "-I/ucrt64/include"
+    fpm build --profile release --flag "-I/ucrt64/include"
 
 For the parallel version, also install `mingw-w64-ucrt-x86_64-msmpi` and the MS-MPI runtime (`msmpisetup.exe` from Microsoft); otherwise use the serial build. On Windows:
 - WRF file names contain `:`, which Windows does not allow: rename them (e.g. `wrfout_d01_2018-05-31_00_00_00`) and use the new names in the list of files.
@@ -87,7 +89,7 @@ The Windows builds are run in the GitHub Actions workflow, but have not been che
 `test/regression` has a regression test with pytest: it runs the program on a small case cropped from the AMZ2 CPM 4 km run (16 x 14 cells over the Andes, 2 days) and compares the outputs with the original run. It needs Python with numpy, netCDF4 and pytest:
 
     python -m pip install numpy netCDF4 pytest
-    python -m pytest test/regression --exe $(fpm run prepro2LDRM-slabvars --flag "$(nf-config --fflags)" --runner echo | tail -1)
+    python -m pytest test/regression --exe $(fpm run prepro2LDRM-slabvars --profile release --flag "$(nf-config --fflags)" --runner echo | tail -1)
 
 Add `--serial` for a serial build, and `--mpiexec PATH` if `mpiexec` is not in PATH. After an intended change in the results, rerun with `--update-reference` and commit the new references. The tests also run on GitHub Actions (`.github/workflows/tests.yml`) for each push.
 
@@ -96,9 +98,9 @@ Add `--serial` for a serial build, and `--mpiexec PATH` if `mpiexec` is not in P
 The default gfortran (11) cannot compile FLAP; use the gcc-toolset-13 one with the system Open MPI and NetCDF-Fortran:
 
     module load mpi/openmpi-x86_64
-    fpm build --compiler /opt/rh/gcc-toolset-13/root/usr/bin/gfortran --flag "$(nf-config --fflags)"
+    fpm build --profile release --compiler /opt/rh/gcc-toolset-13/root/usr/bin/gfortran --flag "$(nf-config --fflags)"
 
-On the login node, MPI runs need `export OMPI_MCA_pml=ob1` (the default UCX transport fails there with "Connection refused"); the tests set it. Jobs on the compute nodes do not need it.
+On the login node, MPI runs need `export OMPI_MCA_pml=ob1` (the default UCX transport fails there with "Connection refused"); the tests set it. Jobs on the compute nodes do not need it. The tests also let Open MPI start more processes than there are cores.
 
 
 ## Notes

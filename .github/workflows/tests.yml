@@ -23,8 +23,6 @@ jobs:
         shell: bash
     env:
       FPM_OPTS: --profile ${{ matrix.profile }} --compiler gfortran
-      # GitHub runners have few cores; the tests start 3 MPI processes
-      OMPI_MCA_rmaps_base_oversubscribe: 1
     steps:
       - uses: actions/checkout@v5
 

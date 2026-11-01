@@ -82,6 +82,9 @@ def run_model(exe, workdir, outname, extra_args, nprocs=1, mpiexec=None, list_na
     # nodes); ob1 uses shared memory, which is all a single-node run needs
     env = dict(os.environ)
     env.setdefault("OMPI_MCA_pml", "ob1")
+    # allow more processes than cores (e.g. GitHub runners): Open MPI 4 and Open MPI 5 (PRRTE)
+    env.setdefault("OMPI_MCA_rmaps_base_oversubscribe", "1")
+    env.setdefault("PRTE_MCA_rmaps_default_mapping_policy", ":oversubscribe")
     result = subprocess.run(cmd, cwd=workdir, env=env, capture_output=True, text=True)
     outdir.mkdir(parents=True, exist_ok=True)  # for the log, also if the run failed early
     (outdir / "stdout.txt").write_text(result.stdout + result.stderr)
