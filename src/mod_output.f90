@@ -15,13 +15,23 @@ module mod_output
     logical, parameter :: at_interslab(nvars) = [.false., .false., .false., .true., .true., .true., .true.]
     character(len=8), parameter :: var_units(nvars) = &
         [character(len=8) :: "kg m-2", "m s-1", "m s-1", "m s-1", "kg kg-1", "kg m-2", "kg m-3"]
-    character(len=100), parameter :: var_long_names(nvars) = [character(len=100) :: &
+    ! short labels, and the definitions of the Supporting Information of Claros et al. (2025), Text S2
+    character(len=40), parameter :: var_long_names(nvars) = [character(len=40) :: &
         "precipitable water of the slab", &
-        "moisture-weighted wind of the slab along the grid x axis (west_east)", &
-        "moisture-weighted wind of the slab along the grid y axis (south_north)", &
+        "moisture-weighted u wind of the slab", &
+        "moisture-weighted v wind of the slab", &
         "vertical wind at the interslab level", &
         "specific humidity at the interslab level", &
-        "vertical water vapor flux at the interslab level (positive upward), accumulated over the output step", &
+        "moisture flux between slabs", &
+        "moist air density at the interslab level"]
+    character(len=140), parameter :: var_descriptions(nvars) = [character(len=140) :: &
+        "water vapor contained in a unit area column of the slab (w in Claros et al., 2025)", &
+        "moisture-weighted average of the wind velocity in the slab, along the grid x axis (west_east)", &
+        "moisture-weighted average of the wind velocity in the slab, along the grid y axis (south_north)", &
+        "vertical wind velocity interpolated to the interslab level", &
+        "specific humidity interpolated to the interslab level", &
+        "vertical moisture flux at the interslab level, accumulated over the output step: " // &
+            "upward (Fu) if positive, downward (Fd) if negative", &
         "density of moist air at the interslab level"]
 
     ! description of the run, written as global attributes of the NetCDF files
@@ -106,10 +116,13 @@ contains
                           level_name(i) // merge("; ", "  ", i < self%nslabs)
         end do
         call nc_check(nf90_def_var(self%ncid, "slab", nf90_int, [dim_slab], varid_slab), file)
-        call put_att(self%ncid, varid_slab, "long_name", "slab number, from the surface up")
+        call put_att(self%ncid, varid_slab, "long_name", "slab number")
+        call put_att(self%ncid, varid_slab, "description", "slab number, from the surface up (1: lower slab)")
         call put_att(self%ncid, varid_slab, "bounds_description", trim(slab_bounds))
         call nc_check(nf90_def_var(self%ncid, "interslab", nf90_float, [dim_interslab], varid_interslab), file)
-        call put_att(self%ncid, varid_interslab, "long_name", "pressure of the interslab level (top of slab n)")
+        call put_att(self%ncid, varid_interslab, "long_name", "interslab level pressure")
+        call put_att(self%ncid, varid_interslab, "description", &
+                     "pressure of the inter-slab interface between slab n and slab n+1")
         call put_att(self%ncid, varid_interslab, "units", "Pa")
         call put_att(self%ncid, varid_interslab, "positive", "down")
 
@@ -126,6 +139,7 @@ contains
                           [dim_x, dim_y, merge(dim_interslab, dim_slab, at_interslab(i)), dim_time], self%ids(i), &
                           chunksizes=[self%nx, self%ny, nlev, 1], shuffle=.true., deflate_level=1), file)
             call put_att(self%ncid, self%ids(i), "long_name", trim(var_long_names(i)))
+            call put_att(self%ncid, self%ids(i), "description", trim(var_descriptions(i)))
             call put_att(self%ncid, self%ids(i), "units", trim(var_units(i)))
             call put_att(self%ncid, self%ids(i), "coordinates", coords)
             if (at_interslab(i)) then
@@ -135,9 +149,13 @@ contains
             end if
         end do
 
-        call put_att(self%ncid, nf90_global, "title", "Slab variables for 2L-DRM")
+        call put_att(self%ncid, nf90_global, "title", "2L-DRM inputs: slab variables")
         call put_att(self%ncid, nf90_global, "source", &
                      "prepro2LDRM-slabvars, https://github.com/erickjomp/2L-DRM-preprocessing")
+        call put_att(self%ncid, nf90_global, "references", &
+                     "Claros, E., Dominguez, F., & Liu, C. (2025), Geophysical Research Letters, 52, e2025GL118806, " // &
+                     "https://doi.org/10.1029/2025GL118806; Dominguez, F., Hu, H., & Martinez, J. A. (2020), " // &
+                     "Journal of Hydrometeorology, 21(1), 3-16, https://doi.org/10.1175/JHM-D-19-0101.1")
         call put_att(self%ncid, nf90_global, "list_files", info%list_files)
         call nc_check(nf90_put_att(self%ncid, nf90_global, "time_factor", info%time_factor), file)
         call nc_check(nf90_put_att(self%ncid, nf90_global, "coarse_factor", info%coarse_factor), file)

@@ -1,7 +1,15 @@
 # prepro2LDRM-slabvars
 
 
-This repository contains the CLI preprocessing program for the 2L-DRM model. This program takes WRF files (wrfout files) as inputs and writes the files that will be the inputs of the 2LDRM model: PW (precipitable water), U (moisture weighted u wind-speed), V (moisture weighted v wind-speed) and PWflux (PW vertical flux between slabs). Other variables (W, Q and moistdensity) are written only for validation purposes.
+This repository contains the CLI preprocessing program for the 2L-DRM model. This program takes WRF files (wrfout files) as inputs and writes the files that will be the inputs of the 2L-DRM model (Dominguez et al., 2020; Claros et al., 2025), for each slab of the atmosphere:
+
+| Variable | Description | Units | Symbol in Claros et al. (2025) |
+|---|---|---|---|
+| PW | precipitable water of the slab: water vapor contained in a unit area column of the slab | kg m-2 | w |
+| U, V | moisture-weighted average of the wind velocity in the slab, along the grid x and y axes | m s-1 | u, v |
+| PWflux | vertical moisture flux at the interslab level, accumulated over the output step: upward if positive, downward if negative | kg m-2 | Fu, Fd |
+
+Other variables at the interslab level (W: vertical wind, Q: specific humidity, moistdensity: density of moist air) are written only for validation purposes.
 
 The program runs on Linux and Windows, in parallel with MPI or as a serial program.
 
@@ -94,12 +102,18 @@ On the login node, MPI runs need `export OMPI_MCA_pml=ob1` (the default UCX tran
 
 
 ## Notes
-- The data in the generated  binary files is in Fortran-like memory order (read more about it here https://manik.cc/2021/02/25/memory-order.html). As a rule of thumb, when reading the binary files  as arrays in python, you should reshape it to dimensions (ntimes, nslabs, ny, nx), except PWflux which has to be reshaped to (ntimes, nslabs-1, ny, nx). The NetCDF files have the same dimensions in this order: (time, slab, south_north, west_east).
+- The data in the generated  binary files is in Fortran-like memory order (read more about it here https://manik.cc/2021/02/25/memory-order.html). As a rule of thumb, when reading the binary files  as arrays in python, you should reshape it to dimensions (ntimes, nslabs, ny, nx), except PWflux which has to be reshaped to (ntimes, nslabs-1, ny, nx). The NetCDF files have the same dimensions in this order: (time, slab, south_north, west_east). Each NetCDF variable has a short `long_name`, a `description` with its definition (as in the `description` attribute of WRF files) and a `comment` about NaN values.
 
-- The precipitable water flux between slabs (PWflux) is calculated by $\rho_{air} w_{wind} q$, where $\rho_{air}$ is the density of the air, $w_{wind}$ is the vertical wind velocity and $q$ is the specific humidity at the interslab pressure level. It is accumulated over each output step (kg m-2).
+- The precipitable water flux between slabs (PWflux) is calculated by $\rho_{air} w_{wind} q$, where $\rho_{air}$ is the density of the air, $w_{wind}$ is the vertical wind velocity and $q$ is the specific humidity at the interslab level. It is accumulated over each output step (kg m-2).
 
 - Where the ground is above an interslab level, the variables of the slab below it and at that level are NaN.
+
+- U and V are along the axes of the WRF grid (as the WRF U and V), not true east and north.
 
 ## Additional binary files required by 2L-DRM
 - Precipitation (PP) and Evapotranspiration can be calculated using the python programs in the folder `other/PP-ET_programs`. To know the arguments required by those programs, please use `python ET_preprocessing_2LDRM.py --help` or  `python PP_preprocessing_2LDRM_fromRAINNC-C.py --help` .
 - Other scripts for additional 2L-DRM inputs can be found in `other/additional_scripts`
+
+## References
+- Claros, E., Dominguez, F., & Liu, C. (2025). Moisture sources of precipitation using convection-permitting simulations: A study over South America. Geophysical Research Letters, 52, e2025GL118806. https://doi.org/10.1029/2025GL118806
+- Dominguez, F., Hu, H., & Martinez, J. A. (2020). Two-layer Dynamic Recycling Model (2L-DRM): Learning from moisture tracking models of different complexity. Journal of Hydrometeorology, 21(1), 3-16. https://doi.org/10.1175/JHM-D-19-0101.1

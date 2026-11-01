@@ -108,7 +108,7 @@ def test_netcdf_metadata(run_case):
     assert np.array_equal(data["XLAT"], read_wrf("XLAT"))
     assert np.array_equal(data["XLONG"], read_wrf("XLONG"))
     for name in OUTPUTS:
-        assert attrs[name]["units"] and attrs[name]["long_name"], name
+        assert attrs[name]["units"] and attrs[name]["long_name"] and attrs[name]["description"], name
         assert attrs[name]["coordinates"] == "XLONG XLAT", name
     assert attrs["global"]["time_factor"] == TIME_FACTOR
     assert attrs["global"]["split"] == "none"
