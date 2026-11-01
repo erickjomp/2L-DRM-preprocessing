@@ -3,7 +3,7 @@
 The original wrfout files (1055 x 863 x 60, hourly, ~2.5 GB each) are cropped
 to a NXC x NYC window over the Ecuadorian Andes and to 2 days that cross a
 month boundary (2018-05-31 00:00 .. 2018-06-02 00:00, 49 files). Only the
-variables read by prepro2LDRM-slabvars are kept. The same window and time
+variables read by prepro2LDRM-metdata are kept. The same window and time
 steps are cut from the outputs of the original run
 (scratch/2LDRM_AMZ2/scripts/01_process_slabsvars_CPM-4km__2levels500.sh),
 which become the reference of the "pl50000" case, and from the PP and ET outputs

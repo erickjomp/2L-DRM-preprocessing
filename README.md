@@ -1,7 +1,17 @@
-# prepro2LDRM-slabvars
+# 2L-DRM preprocessing
 
+Programs that write the inputs of the moisture tracking model 2L-DRM (Dominguez et al., 2020; Claros et al., 2025) from WRF simulations:
 
-This repository contains the CLI preprocessing program for the 2L-DRM model. This program takes WRF files (wrfout files) as inputs and writes the files that will be the inputs of the 2L-DRM model (Dominguez et al., 2020; Claros et al., 2025): for each slab of the atmosphere,
+| Program | Language | Reads | Writes |
+|---|---|---|---|
+| `prepro2LDRM-metdata` | Fortran (serial or MPI) | the WRF output files | the time-varying inputs: PW, U, V, PWflux of the slabs, PP and ET |
+| `prepro2LDRM-regions` | Python | shapefiles and one WRF output file | the fixed inputs: map of the source regions and the target region |
+
+Both use the same grid: the WRF grid, or coarser with the same `--coarse_factor`. Both write NetCDF by default, and the binary files that 2L-DRM reads with `--format bin`.
+
+## prepro2LDRM-metdata
+
+The Fortran program `prepro2LDRM-metdata` (formerly `prepro2LDRM-slabvars`) reads the WRF output files (wrfout) and writes the time-varying inputs of 2L-DRM: for each slab of the atmosphere,
 
 | Variable | Description | Units | Symbol in Claros et al. (2025) |
 |---|---|---|---|
@@ -22,11 +32,11 @@ The program runs on Linux and Windows, in parallel with MPI or as a serial progr
 
 Once installed, please use:
 
-    prepro2LDRM-slabvars --help
+    prepro2LDRM-metdata --help
 
-for more information about the options and arguments of this preprocessing program.
+for the options and arguments.
 
-## List of WRF files
+### List of WRF files
 
 The WRF files are given with `--listfiles` (`-lf`): a text file with one path per line, absolute or relative to the directory where the program runs, in time order (the program does not sort them). Blank lines and lines starting with `#` are skipped. The list can be made with, on Linux:
 
@@ -39,7 +49,7 @@ and on Windows (PowerShell; `Set-Content -Encoding ascii` and not `>`, which wri
 Both sort by name, which is time order for the WRF file names. A single list covers the whole run, also with `--split` (see Outputs).
 
 
-## Outputs
+### Outputs
 
 Each output time step averages `--timefactor` consecutive WRF files (e.g. `-tf 3` with hourly files gives 3-hourly outputs); PWflux, PP and ET are accumulated over the step. The output files are named after the list of files given with `--listfiles`, without its extension (`AMZ2_CPM01.txt` gives `AMZ2_CPM01`):
 
@@ -52,7 +62,7 @@ The daily PW24 and PWflux24 outputs are no longer written; `--extratimefactor` (
 
 To keep using existing scripts that feed 2L-DRM with binary files, add `--format bin` to them.
 
-### PP and ET
+#### PP and ET
 
 PP and ET are written by default (they replace the former python programs of `other/PP-ET_programs`, with the same results for PP, and for ET with `--et_from LH`). `--no_pp_et` skips them, e.g. for WRF files without these variables.
 - PP is the accumulated rain at the end of the output step minus at its start: `RAINNC + RAINC + BUCKET_MM x (I_RAINNC + I_RAINC)`, with the bucket size of the `BUCKET_MM` attribute of the WRF files (`RAINC`, the bucket counters or `BUCKET_MM` count as 0 if missing, as in convection-permitting runs or without the bucket option). So it needs the WRF file at the end of the last step (or at the start of the first one): the list of files must have [n x timefactor + 1] files, and `--remfile` must be 2 (the default) or 1. Output step n goes from file (n-1) x timefactor to file n x timefactor of the whole list.
@@ -61,9 +71,9 @@ PP and ET are written by default (they replace the former python programs of `ot
 The seconds between WRF files (for PWflux and ET) are calculated from the `Times` of the first two files; `--nseconds` is optional and must agree with them.
 
 
-## Build
+### Build
 
-This program is entirely written in Fortran and is computationally very efficient. To build and compile it, you need to have the following installed:
+`prepro2LDRM-metdata` is written in Fortran and is computationally very efficient. To build and compile it, you need to have the following installed:
 1. A compiler that supports Fortran 2018 or later: FLAP uses the Fortran 2018 `stop ..., quiet=`. The program is tested with gfortran (12 or newer; gfortran 11 and older do not support it). Other compilers, e.g. a recent ifx, should work but are not tested.
 2. NetCDF-Fortran (with NetCDF-C), built with a compatible compiler: the program uses its `netcdf` module.
 3. Optionally, an MPI library (MPI is used for parallelization capabilities): Open MPI or MPICH on Linux, MS-MPI on Windows.
@@ -91,13 +101,13 @@ In addition, if using a Linux system, you may want to add `~/.local/bin/` to you
 
     export PATH=~/.local/bin/:$PATH
 
-Then you will be able to call the program `prepro2LDRM-slabvars` from any directory.
+Then you will be able to call the program `prepro2LDRM-metdata` from any directory.
 
-### Serial build (no MPI)
+#### Serial build (no MPI)
 
 To build without MPI, remove `USE_MPI` from `macros` in the `[preprocess.cpp]` section of `fpm.toml`, and the line `mpi = "*"` from `[dependencies]`. The program then runs without `mpirun` and processes all the files in one process.
 
-### Windows
+#### Windows
 
 The simplest way is [MSYS2](https://www.msys2.org) (UCRT64 environment):
 
@@ -111,22 +121,7 @@ For the parallel version, also install `mingw-w64-ucrt-x86_64-msmpi` and the MS-
 The Windows builds are run in the GitHub Actions workflow, but have not been checked on a real machine yet.
 
 
-## Tests
-
-`test/regression` has a regression test with pytest: it runs the program on a small case cropped from the AMZ2 CPM 4 km run (16 x 14 cells over the Andes, 2 days) and compares the outputs with the original run. It needs Python with numpy, netCDF4 and pytest:
-
-    python -m pip install numpy netCDF4 pytest
-    python -m pytest test/regression --exe $(fpm run prepro2LDRM-slabvars --profile release --flag "$(nf-config --fflags)" --runner echo | tail -1)
-
-Add `--serial` for a serial build, and `--mpiexec PATH` if `mpiexec` is not in PATH. `python -m pytest test/python` tests `python/make_regions.py` (it also needs geopandas and regionmask). After an intended change in the results, rerun with `--update-reference` and commit the new references. The tests also run on GitHub Actions (`.github/workflows/tests.yml`) for each push.
-
-### Troubleshooting
-
-- If FLAP does not compile ("Syntax error in STOP statement"), the compiler does not support Fortran 2018 (see Build): give a newer one with `--compiler /path/to/gfortran`, in the build and the test commands.
-- If Open MPI runs fail with "Connection refused" on a machine without a network fabric (e.g. a cluster login node), use its shared-memory transport: `export OMPI_MCA_pml=ob1`. The tests set it, and also let Open MPI start more processes than there are cores.
-
-
-## Notes
+### Notes
 - The data in the generated  binary files is in Fortran-like memory order (read more about it here https://manik.cc/2021/02/25/memory-order.html). As a rule of thumb, when reading the binary files  as arrays in python, you should reshape it to dimensions (ntimes, nslabs, ny, nx), except PWflux which has to be reshaped to (ntimes, nslabs-1, ny, nx). The NetCDF files have the same dimensions in this order: (time, slab, south_north, west_east). Each NetCDF variable has a short `long_name`, a `description` with its definition (as in the `description` attribute of WRF files) and a `comment` about NaN values.
 
 - The precipitable water flux between slabs (PWflux) is calculated by $\rho_{air} w_{wind} q$, where $\rho_{air}$ is the density of the air, $w_{wind}$ is the vertical wind velocity and $q$ is the specific humidity at the interslab level. It is accumulated over each output step (kg m-2).
@@ -135,19 +130,43 @@ Add `--serial` for a serial build, and `--mpiexec PATH` if `mpiexec` is not in P
 
 - U and V are along the axes of the WRF grid (as the WRF U and V), not true east and north.
 
-## Additional binary files required by 2L-DRM
-- Precipitation (PP) and evapotranspiration (ET) are now written by this program (see Outputs). The former python programs are kept in `other/PP-ET_programs` for reference.
-- Source regions and target region: `python/make_regions.py` makes them from shapefiles, on the grid of the WRF files (with the same `--coarse_factor` as this program). The target region is either some of the source regions (their numbers) or any other shapefile:
 
-      python python/make_regions.py --source_regions amazon_basin.shp --target_region 1 --wrf wrfout_d01_2018-05-01_00:00:00 --prefix inputs/amazon --format bin
-      python python/make_regions.py --source_regions countries.shp --field ID --target_region la_plata_basin.shp --wrf ... --prefix inputs/la_plata
+## prepro2LDRM-regions
 
-  The source region of each cell is the `--field` value of its polygon (1 for all polygons without `--field`), and the largest region + 1 outside the polygons and over the ocean (unless `--keep_ocean`); the target region has no ocean cells either (unless `--keep_ocean`). It prints nregions and domsize, and writes:
-  - `--format nc` (default): `<prefix>_regions.nc`, with the map of the source regions (`regions`), the mask of the target region (`target`), XLAT and XLONG, on the same grid as the NetCDF outputs of this program.
-  - `--format bin`: the files that 2L-DRM reads (it does not read NetCDF): `<prefix>_regions.dat`, `<prefix>_target.dat` (the mask of the target region, 1 inside and 0 outside), and `<prefix>_il.dat`, `<prefix>_jl.dat`, the x and y indices of the target-region cells (2L-DRM reads the target region as this list of cells). The indices are 1-based, the Fortran indices used by 2L-DRM: the target files of the former notebooks were 0-based, which 2L-DRM read as the cells one row south and one column west.
+The Python program `prepro2LDRM-regions` (`python/prepro2LDRM_regions.py`) writes the fixed inputs of 2L-DRM, the source regions and the target region, from shapefiles, on the grid of the WRF files (with the same `--coarse_factor` as `prepro2LDRM-metdata`). The target region is either some of the source regions (their numbers) or any other shapefile:
 
-  It needs numpy, netCDF4, geopandas and regionmask (`python -m pip install numpy netCDF4 geopandas regionmask`).
-- The topography mask and the former notebooks are in `other/additional_scripts`.
+    python python/prepro2LDRM_regions.py --source_regions amazon_basin.shp --target_region 1 --wrf wrfout_d01_2018-05-01_00:00:00 --prefix inputs/amazon --format bin
+    python python/prepro2LDRM_regions.py --source_regions countries.shp --field ID --target_region la_plata_basin.shp --wrf ... --prefix inputs/la_plata
+
+The source region of each cell is the `--field` value of its polygon (1 for all polygons without `--field`), and the largest region + 1 outside the polygons and over the ocean (unless `--keep_ocean`); the target region has no ocean cells either (unless `--keep_ocean`). It prints nregions and domsize, and writes:
+- `--format nc` (default): `<prefix>_regions.nc`, with the map of the source regions (`regions`), the mask of the target region (`target`), XLAT and XLONG, on the same grid as the NetCDF outputs of `prepro2LDRM-metdata`.
+- `--format bin`: the files that 2L-DRM reads (it does not read NetCDF): `<prefix>_regions.dat`, `<prefix>_target.dat` (the mask of the target region, 1 inside and 0 outside), and `<prefix>_il.dat`, `<prefix>_jl.dat`, the x and y indices of the target-region cells (2L-DRM reads the target region as this list of cells). The indices are 1-based, the Fortran indices used by 2L-DRM: the target files of the former notebooks were 0-based, which 2L-DRM read as the cells one row south and one column west.
+
+It needs Python with numpy, netCDF4, geopandas and regionmask:
+
+    python -m pip install numpy netCDF4 geopandas regionmask
+
+and `python python/prepro2LDRM_regions.py --help` gives its options.
+
+
+## Tests
+
+`test/regression` has a regression test of `prepro2LDRM-metdata` with pytest: it runs the program on a small case cropped from the AMZ2 CPM 4 km run (16 x 14 cells over the Andes, 2 days) and compares the outputs with the original run. It needs Python with numpy, netCDF4 and pytest:
+
+    python -m pip install numpy netCDF4 pytest
+    python -m pytest test/regression --exe $(fpm run prepro2LDRM-metdata --profile release --flag "$(nf-config --fflags)" --runner echo | tail -1)
+
+Add `--serial` for a serial build, and `--mpiexec PATH` if `mpiexec` is not in PATH. `python -m pytest test/python` tests `python/prepro2LDRM_regions.py` (it also needs geopandas and regionmask). After an intended change in the results, rerun with `--update-reference` and commit the new references. The tests also run on GitHub Actions (`.github/workflows/tests.yml`) for each push.
+
+### Troubleshooting
+
+- If FLAP does not compile ("Syntax error in STOP statement"), the compiler does not support Fortran 2018 (see Build): give a newer one with `--compiler /path/to/gfortran`, in the build and the test commands.
+- If Open MPI runs fail with "Connection refused" on a machine without a network fabric (e.g. a cluster login node), use its shared-memory transport: `export OMPI_MCA_pml=ob1`. The tests set it, and also let Open MPI start more processes than there are cores.
+
+
+## Other files
+- The topography mask and the former notebooks for the regions are in `other/additional_scripts`.
+- The former python programs for PP and ET, replaced by `prepro2LDRM-metdata`, are kept in `other/PP-ET_programs` for reference.
 
 ## References
 - Claros, E., Dominguez, F., & Liu, C. (2025). Moisture sources of precipitation using convection-permitting simulations: A study over South America. Geophysical Research Letters, 52, e2025GL118806. https://doi.org/10.1029/2025GL118806

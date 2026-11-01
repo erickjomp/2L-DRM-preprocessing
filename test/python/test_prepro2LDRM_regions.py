@@ -1,4 +1,4 @@
-"""Tests of python/make_regions.py on the grid of the regression test case.
+"""Tests of python/prepro2LDRM_regions.py on the grid of the regression test case.
 
     pytest test/python
 
@@ -19,7 +19,7 @@ import shapely  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "python"))
-import make_regions  # noqa: E402
+import prepro2LDRM_regions as regions_prog  # noqa: E402
 
 WRF_FILE = ROOT / "test/regression/data/wrfout_d01_2018-05-31_00_00_00.nc"
 LAND_FROM_X = 6  # land for x >= 6 (west_east), ocean to the west
@@ -60,10 +60,10 @@ def case(tmp_path_factory):
 
 def grid(case, cf):
     with netCDF4.Dataset(case["wrf"]) as nc:
-        lat = make_regions.coarsen(np.asarray(nc["XLAT"][0]), cf)
-        lon = make_regions.coarsen(np.asarray(nc["XLONG"][0]), cf)
+        lat = regions_prog.coarsen(np.asarray(nc["XLAT"][0]), cf)
+        lon = regions_prog.coarsen(np.asarray(nc["XLONG"][0]), cf)
         land = (np.asarray(nc["LANDMASK"][0]) + np.asarray(nc["LAKEMASK"][0])) > 0
-    return lat, lon, make_regions.coarsen(land.astype(float), cf) >= 0.5
+    return lat, lon, regions_prog.coarsen(land.astype(float), cf) >= 0.5
 
 
 def expected_regions(case, cf, keep_ocean):
@@ -78,7 +78,7 @@ def expected_regions(case, cf, keep_ocean):
 
 def run(case, name, target, *args, field=("--field", "ID")):
     prefix = case["dir"] / name
-    make_regions.main(["--source_regions", str(case["shp"]), *field, "--target_region", *target,
+    regions_prog.main(["--source_regions", str(case["shp"]), *field, "--target_region", *target,
                        "--wrf", str(case["wrf"]), "--prefix", str(prefix), "--format", "bin", *args])
     regions = np.fromfile(f"{prefix}_regions.dat", np.float32)
     il = np.fromfile(f"{prefix}_il.dat", np.float32).astype(int)
@@ -161,7 +161,7 @@ def test_netcdf(case, target):
     target = [str(case["target_shp"])] if target == "shapefile" else target
     regions, il, jl = run(case, "bin_for_nc", target, "-cf", "2")
     prefix = case["dir"] / "nc"
-    make_regions.main(["-sr", str(case["shp"]), "-f", "ID", "-tr", *target, "--wrf", str(case["wrf"]),
+    regions_prog.main(["-sr", str(case["shp"]), "-f", "ID", "-tr", *target, "--wrf", str(case["wrf"]),
                        "--prefix", str(prefix), "-cf", "2"])
     lat, lon, _ = grid(case, 2)
     with netCDF4.Dataset(f"{prefix}_regions.nc") as nc:

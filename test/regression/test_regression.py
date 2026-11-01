@@ -1,4 +1,4 @@
-"""Regression tests: run prepro2LDRM-slabvars on the cropped AMZ2 CPM 4 km case.
+"""Regression tests: run prepro2LDRM-metdata on the cropped AMZ2 CPM 4 km case.
 
     pytest test/regression --exe PATH [--mpiexec PATH] [--update-reference]
 

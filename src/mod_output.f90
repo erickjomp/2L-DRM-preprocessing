@@ -180,7 +180,7 @@ contains
 
         call put_att(self%ncid, nf90_global, "title", "2L-DRM inputs")
         call put_att(self%ncid, nf90_global, "source", &
-                     "prepro2LDRM-slabvars, https://github.com/erickjomp/2L-DRM-preprocessing")
+                     "prepro2LDRM-metdata, https://github.com/erickjomp/2L-DRM-preprocessing")
         call put_att(self%ncid, nf90_global, "references", &
                      "Claros, E., Dominguez, F., & Liu, C. (2025), Geophysical Research Letters, 52, e2025GL118806, " // &
                      "https://doi.org/10.1029/2025GL118806; Dominguez, F., Hu, H., & Martinez, J. A. (2020), " // &

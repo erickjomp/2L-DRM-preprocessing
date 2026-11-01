@@ -1,9 +1,9 @@
 """Source regions and target region of 2L-DRM from shapefiles, on the grid of the WRF files.
 
-    python make_regions.py --source_regions basins.shp [--field ID] --target_region 1 3 \
+    python prepro2LDRM_regions.py --source_regions basins.shp [--field ID] --target_region 1 3 \
         --wrf wrfout_d01_2018-05-01_00:00:00 --prefix inputs/amazon [--coarse_factor 2] [--keep_ocean] \
         [--format bin]
-    python make_regions.py --source_regions countries.shp --field ID --target_region la_plata.shp ...
+    python prepro2LDRM_regions.py --source_regions countries.shp --field ID --target_region la_plata.shp ...
 
 The source regions: the region of a cell is the --field value of the polygon of
 --source_regions that contains its center (1 for every polygon without --field), and
@@ -22,7 +22,7 @@ the mask of the target region (on the same grid), XLAT and XLONG; with
   Fortran indices of 2L-DRM.
 It prints nx, ny, nregions and the number of target cells (domsize), which 2L-DRM needs.
 
-The grid is that of prepro2LDRM-slabvars with the same --coarse_factor: XLAT and XLONG
+The grid is that of prepro2LDRM-metdata with the same --coarse_factor: XLAT and XLONG
 averaged over blocks of coarse_factor x coarse_factor cells (the last rows and columns that
 do not fill a block are dropped); a coarse cell is land if at least half of its cells are.
 
@@ -40,7 +40,7 @@ import regionmask
 
 
 def coarsen(field, cf):
-    """block means of cf x cf cells of a (ny, nx) field, as prepro2LDRM-slabvars"""
+    """block means of cf x cf cells of a (ny, nx) field, as prepro2LDRM-metdata"""
     ny, nx = (s // cf for s in field.shape)
     return field[:ny * cf, :nx * cf].reshape(ny, cf, nx, cf).mean(axis=(1, 3), dtype=np.float64)
 
@@ -114,7 +114,7 @@ def target_cells(target_region, regions, nregions, lat, lon, land):
 
 def write_nc(file, regions, nregions, target, lat, lon, args, target_desc):
     """regions, target region, XLAT and XLONG in one NetCDF file, as the outputs of
-    prepro2LDRM-slabvars"""
+    prepro2LDRM-metdata"""
     ny, nx = regions.shape
     with netCDF4.Dataset(file, "w") as nc:
         nc.createDimension("west_east", nx)
@@ -138,7 +138,7 @@ def write_nc(file, regions, nregions, target, lat, lon, args, target_desc):
         var.coordinates = "XLONG XLAT"
         var[:] = target.astype(np.int8)
         nc.title = "2L-DRM source and target regions"
-        nc.source = "make_regions.py of prepro2LDRM-slabvars, https://github.com/erickjomp/2L-DRM-preprocessing"
+        nc.source = "prepro2LDRM-regions (prepro2LDRM_regions.py) of prepro2LDRM-metdata, https://github.com/erickjomp/2L-DRM-preprocessing"
         nc.nregions = np.int32(nregions)
         nc.domsize = np.int32(target.sum())
         nc.source_regions = str(args.source_regions)
@@ -161,7 +161,7 @@ def main(argv=None):
     parser.add_argument("--wrf", required=True, type=Path,
                         help="a wrfout file of the run (for XLAT, XLONG, LANDMASK, LAKEMASK)")
     parser.add_argument("--prefix", required=True, help="prefix of the output files, e.g. inputs/amazon")
-    parser.add_argument("--coarse_factor", "-cf", type=int, default=1, help="as in prepro2LDRM-slabvars (default 1)")
+    parser.add_argument("--coarse_factor", "-cf", type=int, default=1, help="as in prepro2LDRM-metdata (default 1)")
     parser.add_argument("--keep_ocean", action="store_true", help="keep the ocean cells in the regions and the target")
     parser.add_argument("--format", "-fmt", choices=["nc", "bin"], default="nc",
                         help="nc (default): <prefix>_regions.nc; bin: the .dat files that 2L-DRM reads")

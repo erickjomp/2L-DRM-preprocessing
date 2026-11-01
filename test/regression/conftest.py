@@ -7,7 +7,7 @@ import regression
 
 
 def pytest_addoption(parser):
-    parser.addoption("--exe", type=Path, help="path to the prepro2LDRM-slabvars executable to test")
+    parser.addoption("--exe", type=Path, help="path to the prepro2LDRM-metdata executable to test")
     parser.addoption("--mpiexec", type=Path, default=shutil.which("mpiexec"),
                      help="MPI launcher for the multi-process runs (default: mpiexec in PATH); "
                           "those tests are skipped without it")
@@ -22,7 +22,7 @@ def exe(request):
     path = request.config.getoption("--exe")
     if path is None:
         pytest.fail("pass the executable with --exe, e.g. "
-                    "--exe $(fpm run prepro2LDRM-slabvars --runner echo | tail -1)", pytrace=False)
+                    "--exe $(fpm run prepro2LDRM-metdata --runner echo | tail -1)", pytrace=False)
     if not path.is_file():
         pytest.fail(f"--exe {path} does not exist", pytrace=False)
     return path.resolve()

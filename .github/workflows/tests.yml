@@ -55,7 +55,7 @@ jobs:
 
       - name: Regression test
         run: |
-          exe=$(fpm run prepro2LDRM-slabvars $FPM_OPTS --flag "$(nf-config --fflags)" --runner echo | tail -1)
+          exe=$(fpm run prepro2LDRM-metdata $FPM_OPTS --flag "$(nf-config --fflags)" --runner echo | tail -1)
           python -m pytest test/regression -v --exe "$exe" ${{ !matrix.mpi && '--serial' || '' }}
 
   python:
@@ -71,7 +71,7 @@ jobs:
       - name: Install Python packages
         run: python -m pip install numpy netCDF4 geopandas regionmask pytest
 
-      - name: Test python/make_regions.py
+      - name: Test python/prepro2LDRM_regions.py
         run: python -m pytest test/python -v
 
   windows:
@@ -116,7 +116,7 @@ jobs:
       - name: Build
         run: |
           fpm build --compiler gfortran --flag "-I/ucrt64/include"
-          exe=$(fpm run prepro2LDRM-slabvars --compiler gfortran --flag "-I/ucrt64/include" --runner echo | tail -1)
+          exe=$(fpm run prepro2LDRM-metdata --compiler gfortran --flag "-I/ucrt64/include" --runner echo | tail -1)
           echo "EXE=$(cygpath -w "$(realpath "$exe")")" >> "$GITHUB_ENV"
 
       # native Windows Python (wheels for numpy and netCDF4); the program needs the
