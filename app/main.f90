@@ -876,11 +876,11 @@ program main
     ! ! interpolated data (interslabs)
     deallocate(data_pottemp_inter)
     deallocate(data_temp_inter)
-    ! deallocate(data_mixingratio_intZer)
+    deallocate(data_mixingratio_inter)
+    deallocate(data_density_inter)
     ! deallocate(data_What_inter)  
     deallocate(data_PWflux)
     deallocate(data_PWflux_coarse)  
-    ! deallocate(data_PWflux_out)
     
     if (save_density) then
         deallocate(data_density_coarse)
@@ -1039,6 +1039,8 @@ program main
     deallocate(data_PW_out) 
     deallocate(data_Q_out) 
     deallocate(data_What_out)
+    deallocate(data_PWflux_out)                               ! from PWFLUX program
+    if (allocated(data_density_out)) deallocate(data_density_out)  ! from PWFLUX program
     deallocate(data_PP_out, data_ET_out)
 
 #ifdef USE_MPI
