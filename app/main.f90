@@ -1039,6 +1039,7 @@ program main
     deallocate(data_PW_out) 
     deallocate(data_Q_out) 
     deallocate(data_What_out)
+    deallocate(data_PP_out, data_ET_out)
 
 #ifdef USE_MPI
     call MPI_FINALIZE(ierror)
