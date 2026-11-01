@@ -41,9 +41,7 @@ program main
     integer                                      :: nx_coarse, ny_coarse, coarse_factor, time_factor
     real(4), dimension(:,:,:,:), allocatable     :: data_U_coarse, data_V_coarse, data_PW_coarse, data_Q_coarse, data_What_coarse
     real(4), dimension(:,:,:,:), allocatable     :: data_U_out, data_V_out, data_PW_out, data_Q_out, data_What_out
-    real(4), dimension(:,:,:,:), allocatable     :: data_PW_temp  ! for extra time aggreagtion of PW
-    integer                                      :: extra_time_factor_PW, time_factor_extra, i_extra  ! for extra time aggreagtion of PW
-    character(len=50)                            :: var_PW_extra  ! for extra time aggreagtion of PW
+    integer                                      :: extra_time_factor_PW  ! deprecated -etf, ignored
     real(4)                                      :: startTime,stopTime
     integer                                      :: i_file, n_files_by_chunk, i_chunk, n_all_chunks, counter_chunk
     character(len=50), dimension(5)              :: vars_out_names
@@ -64,8 +62,8 @@ program main
     real(4), dimension(:,:,:,:), allocatable     :: data_pottemp 
     real(4), dimension(:,:,:,:), allocatable     :: data_pottemp_inter, data_temp_inter, data_mixingratio_inter, data_density_inter
     real(4), dimension(:,:,:,:), allocatable     :: data_PWflux, data_PWflux_coarse, data_PWflux_out, data_density_coarse, &
-                                                    data_density_out, data_PWflux_temp
-    character(len=20)                            :: var_PWflux, var_PWflux_extra, var_density, var_perturbation_pottemp ! from PWFLUX program
+                                                    data_density_out
+    character(len=20)                            :: var_PWflux, var_density, var_perturbation_pottemp ! from PWFLUX program
     logical                                      :: cum_per_timestep, save_density   ! from PWFLUX program
     real(4)                                      :: nseconds_in_timestep             ! from PWFLUX program
     real(4)                                      :: base_state_pottemp               ! from PWFLUX program
@@ -91,10 +89,8 @@ program main
     nt = 1   ! number of raw timesteps per file
     ! nslabs = 2
     coarse_factor = 1  ! optionally read in CLI
-    ! two next ones read via CLI
+    ! read via CLI
     ! time_factor = 3
-    ! extra_time_factor_PW = 24 ! must be  multiple of time_factor, if same value as time_factor is provided, 
-                        ! then no extra aggregation occurs
     rem_file = 0
     
 
@@ -113,7 +109,6 @@ program main
 
 
     vars_out_names = (/"PW","U ","V ","W ","Q "/)
-    var_PW_extra = "PW24"  ! only in case  extra_time_factor_PW  is not time_factor
 
 
     !############################################################################################################!
@@ -123,7 +118,6 @@ program main
     base_state_pottemp = 300     ! https://www2.mmm.ucar.edu/wrf/users/wrf_users_guide/build/html/output.html
 
     var_PWflux = "PWflux"
-    var_PWflux_extra = "PWflux24"
     cum_per_timestep = .true.
     nseconds_in_timestep = 60*60  ! number of seconds per timestep in input data
     save_density = .true.
@@ -182,10 +176,11 @@ program main
 
     call cli%add(switch='--extratimefactor', &
         switch_ab='-etf',    &
-        help='extra time factor to which precipitable water (PW) and PW flux (PWflux) will be calculated. &
-              &If the input data is hourly, this will normally be 24.',   &
-        required=.true.,   &
+        help='Deprecated and ignored: the daily PW24 and PWflux24 outputs are no longer written. &
+              &Will be removed in a future version.',   &
+        required=.false.,   &
         act='store',       &
+        def="0",          &
         error=error_cli)
     if (error_cli/=0) stop
 
@@ -279,6 +274,8 @@ program main
     if (error_cli/=0) stop
     call cli%get(switch='-etf', val=extra_time_factor_PW, error=error_cli)
     if (error_cli/=0) stop
+    if (cli%is_passed(switch='-etf')) print *, "Warning: -etf/--extratimefactor is deprecated and ignored &
+                                               &(PW24 and PWflux24 are no longer written)"
     call cli%get(switch='-cf', val=coarse_factor, error=error_cli)
     if (error_cli/=0) stop
     call cli%get(switch='-rf', val=rem_file, error=error_cli)
@@ -730,30 +727,6 @@ program main
     call MPI_BARRIER(MPI_COMM_WORLD, ierror)
 #endif
     if (process_Rank==0) then
-        ! for extra time aggragation PW
-        if (mod(extra_time_factor_PW, time_factor) == 0) then
-            time_factor_extra = extra_time_factor_PW / time_factor
-            if (time_factor_extra > 1) then
-                i_extra = 1
-                allocate(data_PW_temp(nx_coarse, ny_coarse, nslabs, time_factor_extra))
-                open(211,  file = prefix_out // trim(var_PW_extra) //".dat", &
-                                status='REPLACE', action="write", access='stream')
-    !############################################################################################################!
-    !#######################################  from PWFLUX program ###############################################!
-    !############################################################################################################!
-                allocate(data_PWflux_temp(nx_coarse, ny_coarse, nslabs-1, time_factor_extra))
-                open(221,  file = prefix_out // trim(var_PWflux_extra) //".dat", &
-                                status='REPLACE', action="write", access='stream')
-    !############################################################################################################!
-    !##################################### END from PWFLUX program ##############################################!
-    !############################################################################################################!
-            end if
-        else
-            print *, "extra_time_factor_PW must be a multiple of time_factor"
-            stop
-        end if
-        ! END for extra time aggragation PW
-
         open(111,file = prefix_out // trim(vars_out_names(1)) //".dat", &
                 status = "REPLACE", action = "write", access='stream')
         open(112,file = prefix_out // trim(vars_out_names(2)) //".dat", &
@@ -839,29 +812,6 @@ program main
     !############################################################################################################!
     !##################################### END from PWFLUX program ##############################################!
     !############################################################################################################!
-                ! for extra time aggragation PW
-                if (time_factor_extra > 1) then
-                    data_PW_temp(:,:,:,i_extra) = data_PW_out(:,:,:,1)
-                    data_PWflux_temp(:,:,:,i_extra) = data_PWflux_out(:,:,:,1) ! from PWFLUX program
-                    if (i_extra == time_factor_extra) then
-                        write(211)  sum(data_PW_temp,dim = 4) / time_factor_extra
-    !############################################################################################################!
-    !#######################################  from PWFLUX program ###############################################!
-    !############################################################################################################!                     
-                        if (.not. cum_per_timestep)   write(221)  sum(data_PWflux_temp,dim = 4) / time_factor_extra
-                        if (cum_per_timestep)  then
-                              write(221) sum(data_PWflux_temp * (time_factor * nseconds_in_timestep) ,dim = 4)  
-                        end if
-    !############################################################################################################!
-    !##################################### END from PWFLUX program ##############################################!
-    !############################################################################################################!
-                        i_extra = 0
-                    end if
-                    i_extra = i_extra + 1
-                end if
-                ! END for extra time aggragation PW  
-
-
             end do
 
 
@@ -883,11 +833,6 @@ program main
         close(115)
         close(121)                           ! from PWFLUX program
         if (save_density)   close(122)       ! from PWFLUX program
-
-        if (time_factor_extra > 1) then
-            close(211)
-            close(221)                       ! from PWFLUX program 
-        end if
     end if
 
     deallocate(data_U_out)      

@@ -41,14 +41,12 @@ NXC, NYC = 16, 14
 FIRST_FILE = "2018-05-31_00:00:00"
 NFILES = 49           # 48 hourly files used (-rf 2 drops the last one)
 TIME_FACTOR = 3       # -tf of the original run
-EXTRA_TIME_FACTOR = 24  # -etf of the original run
 
 WRF_VARS = ["P", "PB", "U", "V", "W", "T", "QVAPOR", "XLAT", "XLONG"]
 
 # name -> number of levels (slabs or interslabs) in the reference outputs
 REF_VARS = {"PW": NSLABS, "U": NSLABS, "V": NSLABS,
-            "W": NSLABS - 1, "Q": NSLABS - 1, "PWflux": NSLABS - 1, "moistdensity": NSLABS - 1,
-            "PW24": NSLABS, "PWflux24": NSLABS - 1}
+            "W": NSLABS - 1, "Q": NSLABS - 1, "PWflux": NSLABS - 1, "moistdensity": NSLABS - 1}
 
 
 def crop_slices(dims):
@@ -118,15 +116,14 @@ def main():
         p_lowest.append(crop_wrfout(src, dst))
 
     # the reference run also used -rf 2, so output step n starts at file n * time factor
-    if first % EXTRA_TIME_FACTOR:
-        raise SystemExit(f"{FIRST_FILE} must start a day of the reference outputs")
+    if first % TIME_FACTOR:
+        raise SystemExit(f"{FIRST_FILE} must start an output step of the reference outputs")
     nused = NFILES - 1
     # used by the tests to know where the ground is above an interslab level, (nused, ny, nx)
     write_gz(args.out_data / "p_lowest_level.dat.gz", np.array(p_lowest[:nused]))
     for name, nlev in REF_VARS.items():
-        factor = EXTRA_TIME_FACTOR if name.endswith("24") else TIME_FACTOR
-        crop_reference(name, nlev, first // factor, nused // factor, args.out_ref)
-        print(f"reference {name}: steps {first // factor}..{(first + nused) // factor - 1}")
+        crop_reference(name, nlev, first // TIME_FACTOR, nused // TIME_FACTOR, args.out_ref)
+        print(f"reference {name}: steps {first // TIME_FACTOR}..{(first + nused) // TIME_FACTOR - 1}")
 
 
 if __name__ == "__main__":

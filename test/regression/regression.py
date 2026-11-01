@@ -13,7 +13,7 @@ REF_DIR = HERE / "reference"
 
 # Cropped grid written by make_test_data.py
 NX, NY, NZ, NSLABS = 16, 14, 60, 2
-TIME_FACTOR, EXTRA_TIME_FACTOR = 3, 24
+TIME_FACTOR = 3
 NFILES_USED = 48  # 49 files in data/, -rf 2 drops the last one
 
 LIST_NAME = "wrf_files.txt"  # its stem is the prefix of the output files
@@ -21,7 +21,7 @@ BASENAME = Path(LIST_NAME).stem
 
 COMMON_ARGS = [
     "-lf", LIST_NAME,
-    "-tf", str(TIME_FACTOR), "-etf", str(EXTRA_TIME_FACTOR), "-rf", "2",
+    "-tf", str(TIME_FACTOR), "-rf", "2",
     "-nx", str(NX), "-ny", str(NY), "-nz", str(NZ), "-ns", str(NSLABS),
 ]
 
@@ -32,6 +32,7 @@ CASES = {
     "pl50000": ["-pl", "50000"],
     "pl95000": ["-pl", "95000"],
     "pl50000_cf2": ["-pl", "50000", "-cf", "2"],
+    "pl50000_etf": ["-pl", "50000", "-etf", "24"],  # deprecated, must be ignored
 }
 PRESSURE_LEVEL = {"pl50000": 50000.0, "pl95000": 95000.0}
 REFERENCE_CASES = ["pl50000", "pl95000"]
@@ -40,9 +41,7 @@ REFERENCE_CASES = ["pl50000", "pl95000"]
 OUTPUTS = {
     "PW": NSLABS, "U": NSLABS, "V": NSLABS,
     "W": NSLABS - 1, "Q": NSLABS - 1, "PWflux": NSLABS - 1, "moistdensity": NSLABS - 1,
-    "PW24": NSLABS, "PWflux24": NSLABS - 1,
 }
-DAILY_OUTPUTS = {"PW24": "PW", "PWflux24": "PWflux"}
 
 # Same compiler and flags reproduce the reference bit for bit; the tolerance
 # leaves room for other compilers, optimization levels and platforms.
