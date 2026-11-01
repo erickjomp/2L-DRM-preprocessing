@@ -64,7 +64,7 @@ The seconds between WRF files (for PWflux and ET) are calculated from the `Times
 ## Build
 
 This program is entirely written in Fortran and is computationally very efficient. To build and compile it, you need to have the following installed:
-1. A Fortran compiler that supports Fortran 2018 `stop ..., quiet=` (needed by FLAP), e.g. gfortran 12 or newer, or ifx.
+1. A Fortran 2018 compiler, e.g. gfortran 12 or newer, or ifx (FLAP uses the Fortran 2018 `stop ..., quiet=`, which gfortran 11 and older do not support).
 2. NetCDF-Fortran (with NetCDF-C), built with a compatible compiler: the program uses its `netcdf` module.
 3. Optionally, an MPI library (MPI is used for parallelization capabilities): Open MPI or MPICH on Linux, MS-MPI on Windows.
 4. Fortran Package Manager (fpm), version 0.13 or newer. See intructions for installing it here: https://github.com/fortran-lang/fpm. It can be installed in a conda environment (`conda install -c conda-forge fpm`).
@@ -122,7 +122,7 @@ Add `--serial` for a serial build, and `--mpiexec PATH` if `mpiexec` is not in P
 
 ### Troubleshooting
 
-- If the system gfortran is older than 12 (FLAP does not compile), give a newer one with `--compiler /path/to/gfortran`, in the build and the test commands.
+- If FLAP does not compile ("Syntax error in STOP statement"), the compiler does not support Fortran 2018 (see Build): give a newer one with `--compiler /path/to/gfortran`, in the build and the test commands.
 - If Open MPI runs fail with "Connection refused" on a machine without a network fabric (e.g. a cluster login node), use its shared-memory transport: `export OMPI_MCA_pml=ob1`. The tests set it, and also let Open MPI start more processes than there are cores.
 
 

@@ -24,6 +24,7 @@ source-form = "free"
 # USE_MPI here and the mpi dependency below
 macros = ["USE_MPI"]
 [dependencies]
+# FLAP needs a Fortran 2018 compiler (stop ..., quiet=): e.g. gfortran 12 or newer, or ifx
 FLAP = { git="https://github.com/szaghi/FLAP.git", tag="v2.5.3" }
 mpi = "*"
 # stdlib-fpm branch of fortran-lang/stdlib, same revision as 2L-DRM (stdlib_system is used)
