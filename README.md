@@ -64,7 +64,7 @@ The seconds between WRF files (for PWflux and ET) are calculated from the `Times
 ## Build
 
 This program is entirely written in Fortran and is computationally very efficient. To build and compile it, you need to have the following installed:
-1. A Fortran 2018 compiler, e.g. gfortran 12 or newer, or ifx (FLAP uses the Fortran 2018 `stop ..., quiet=`, which gfortran 11 and older do not support).
+1. A compiler that supports Fortran 2018 or later: FLAP uses the Fortran 2018 `stop ..., quiet=`. The program is tested with gfortran (12 or newer; gfortran 11 and older do not support it). Other compilers, e.g. a recent ifx, should work but are not tested.
 2. NetCDF-Fortran (with NetCDF-C), built with a compatible compiler: the program uses its `netcdf` module.
 3. Optionally, an MPI library (MPI is used for parallelization capabilities): Open MPI or MPICH on Linux, MS-MPI on Windows.
 4. Fortran Package Manager (fpm), version 0.13 or newer. See intructions for installing it here: https://github.com/fortran-lang/fpm. It can be installed in a conda environment (`conda install -c conda-forge fpm`).
