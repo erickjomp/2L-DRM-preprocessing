@@ -1,0 +1,25 @@
+# Python program prepro2LDRM-regions (python/prepro2LDRM_regions.py): `pip install .` installs
+# the command prepro2LDRM-regions. The Fortran program prepro2LDRM-metdata is built with fpm
+# (fpm.toml).
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "prepro2LDRM-regions"
+version = "0.1.0"
+description = "Source regions and target region of 2L-DRM from shapefiles, on the grid of WRF files"
+readme = "README.md"
+authors = [{ name = "Erick Claros" }]
+requires-python = ">=3.9"
+dependencies = ["numpy", "netCDF4", "geopandas", "regionmask"]
+
+[project.urls]
+Repository = "https://github.com/erickjomp/2L-DRM-preprocessing"
+
+[project.scripts]
+prepro2LDRM-regions = "prepro2LDRM_regions:main"
+
+[tool.setuptools]
+py-modules = ["prepro2LDRM_regions"]
+package-dir = { "" = "python" }

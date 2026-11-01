@@ -8,3 +8,4 @@ __pycache__/
 
 # notes for a specific machine
 instructions_to_build.txt
+*.egg-info/
