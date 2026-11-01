@@ -42,9 +42,9 @@ To keep using existing scripts that feed 2L-DRM with binary files, add `--format
 
 ### PP and ET
 
-PP and ET are written by default (they replace the former python programs of `other/PP-ET_programs`, with the same results). `--no_pp_et` skips them, e.g. for WRF files without these variables.
+PP and ET are written by default (they replace the former python programs of `other/PP-ET_programs`, with the same results for PP, and for ET with `--et_from LH`). `--no_pp_et` skips them, e.g. for WRF files without these variables.
 - PP is the accumulated rain at the end of the output step minus at its start: `RAINNC + RAINC + BUCKET_MM x (I_RAINNC + I_RAINC)`, with the bucket size of the `BUCKET_MM` attribute of the WRF files (`RAINC`, the bucket counters or `BUCKET_MM` count as 0 if missing, as in convection-permitting runs or without the bucket option). So it needs the WRF file at the end of the last step (or at the start of the first one): the list of files must have [n x timefactor + 1] files, and `--remfile` must be 2 (the default) or 1. Output step n goes from file (n-1) x timefactor to file n x timefactor of the whole list.
-- ET is the sum over the files of the output step of `LH / Lv` times the seconds between files, where `Lv = 4185.5 (751.78 - 0.5655 T2B)` (J kg-1) is the latent heat of vaporization; negative values are set to 0.
+- ET is the sum over the files of the output step of the evapotranspiration rate times the seconds between files; negative values are set to 0. By default the rate is `QFX`, the surface moisture flux: the water WRF evaporates into the atmosphere. With `--et_from LH` it is `LH / Lv`, with `Lv = 4185.5 (751.78 - 0.5655 T2B)` J kg-1, as the former python program (used in Claros et al., 2025). WRF calculates `LH` as `QFX` times a constant latent heat of vaporization (2.5104e6 J kg-1 in Noah-MP, 2.5e6 over water, also in WRF 4.8), so `LH / Lv(T2B)` gives 2-3 % more ET than `QFX` at 296-302 K.
 
 The seconds between WRF files (for PWflux and ET) are calculated from the `Times` of the first two files; `--nseconds` is optional and must agree with them.
 

@@ -3,7 +3,8 @@
     pytest test/regression --exe PATH [--mpiexec PATH] [--update-reference]
 
 The pl50000 reference was cut from the outputs of the original AMZ2 run, and
-the PP and ET reference (surface) from the outputs of the former python programs;
+the PP and ET_LH (ET with --et_from LH) references from the outputs of the former
+python programs; ET (from QFX) is checked against numpy and was produced by this program;
 the pl95000 reference was produced by an earlier version of this program.
 A failure means results changed, not that they are wrong. After an intended
 change in results, rerun with --update-reference and commit the new references.
@@ -118,6 +119,8 @@ def test_netcdf_metadata(run_case):
             assert nc[name].dimensions == ("time", "south_north", "west_east"), name
     assert attrs["global"]["time_factor"] == TIME_FACTOR
     assert attrs["global"]["split"] == "none"
+    assert attrs["global"]["et_from"] == "QFX"
+    assert "QFX" in attrs["ET"]["description"]
     assert np.array_equal(attrs["global"]["pressure_levels_Pa"], 95000.0)
 
 
@@ -196,6 +199,24 @@ def test_pp_et_from_wrf_fields(run_case, cf):
     for name, expected in [("PP", pp_from_wrf(cf)), ("ET", et_from_wrf(cf))]:
         errors = compare_grid(read_output(outdir, name, nx, ny), expected)
         assert not errors, f"{name}: " + "\n".join(errors)
+
+
+def test_et_from_lh(run_case, update_reference):
+    """--et_from LH: ET as the former python program (reference cut from its outputs), and
+    2-3 % more than from QFX, since WRF's LH is QFX times a constant 2.5e6 J kg-1."""
+    outdir = run_case("pl50000_etLH")
+    if update_reference:
+        changed = save_reference(output_path(outdir, "ET"), reference_path("pl50000", "ET_LH"))
+        pytest.skip(f"reference {'updated' if changed else 'unchanged'}: ET_LH")
+    et_lh = read_output(outdir, "ET")
+    errors = compare_grid(et_lh, read_reference("pl50000", "ET_LH"))
+    assert not errors, "\n".join(errors)
+    errors = compare_grid(et_lh, et_from_wrf(et_from="LH"))
+    assert not errors, "\n".join(errors)
+    et_qfx = read_output(run_case("pl50000"), "ET")
+    wet = et_qfx > 0.05 * et_qfx.max()
+    ratio = et_lh[wet] / et_qfx[wet]
+    assert 1.0 < np.median(ratio) < 1.04, np.median(ratio)
 
 
 def test_remfile_1(exe, inputs, run_case):

@@ -43,6 +43,7 @@ CASES = {
     "pl50000_month": ["-pl", "50000", "-fmt", "bin", "-sp", "month"],
     "pl50000_month_nc": ["-pl", "50000", "-sp", "month"],
     "pl50000_year_nc": ["-pl", "50000", "-sp", "year"],
+    "pl50000_etLH": ["-pl", "50000", "-fmt", "bin", "-etfrom", "LH"],  # ET as the former python program
 }
 PRESSURE_LEVEL = {"pl50000": 50000.0, "pl95000": 95000.0}
 REFERENCE_CASES = ["pl50000", "pl95000"]
@@ -119,8 +120,10 @@ def expected_files(outdir, args, basename):
 
 
 def reference_path(case, name):
-    """PP and ET do not depend on the pressure levels: one reference for all cases."""
-    return REF_DIR / ("surface" if name in SURFACE_OUTPUTS else case) / f"{name}.dat.gz"
+    """PP and ET (ET_LH: with --et_from LH) do not depend on the pressure levels: one
+    reference for all cases."""
+    surface = name in SURFACE_OUTPUTS or name == "ET_LH"
+    return REF_DIR / ("surface" if surface else case) / f"{name}.dat.gz"
 
 
 def to_grid(raw, name, nx=NX, ny=NY):
@@ -180,18 +183,21 @@ def pp_from_wrf(cf=1, case_dir=CASE_DIR):
     return np.diff(bounds, axis=0)[:, None]
 
 
-def et_from_wrf(cf=1, first_file=0):
-    """Expected ET, (nt, 1, ny, nx): sum over the files of each step of LH / Lv(T2B) times
-    the seconds per file, negative values set to 0 (after coarsening, as the python program)."""
-    lh, t2b = read_wrf_all("LH"), read_wrf_all("T2B")
-    rate = lh / (np.float32(4185.5) * (np.float32(751.78) - np.float32(0.5655) * t2b))
+def et_from_wrf(cf=1, first_file=0, et_from="QFX"):
+    """Expected ET, (nt, 1, ny, nx): sum over the files of each step of QFX (or LH / Lv(T2B))
+    times the seconds per file, negative values set to 0 (after coarsening, as the python program)."""
+    if et_from == "QFX":
+        rate = read_wrf_all("QFX")
+    else:
+        lh, t2b = read_wrf_all("LH"), read_wrf_all("T2B")
+        rate = lh / (np.float32(4185.5) * (np.float32(751.78) - np.float32(0.5655) * t2b))
     rate = coarsen(rate[first_file:first_file + NFILES_USED].astype("f8"), cf)
     steps = rate.reshape(-1, TIME_FACTOR, *rate.shape[1:]).sum(axis=1) * SECONDS_PER_FILE
     return np.maximum(steps, 0)[:, None]
 
 
 def read_reference(case, name):
-    return to_grid(gzip.decompress(reference_path(case, name).read_bytes()), name)
+    return to_grid(gzip.decompress(reference_path(case, name).read_bytes()), "ET" if name == "ET_LH" else name)
 
 
 def read_p_lowest_level():

@@ -8,7 +8,8 @@ steps are cut from the outputs of the original run
 (scratch/2LDRM_AMZ2/scripts/01_process_slabsvars_CPM-4km__2levels500.sh),
 which become the reference of the "pl50000" case, and from the PP and ET outputs
 of the former python programs (01_process_2Dvars_CPM-4km_3H.sh), the reference of
-PP and ET ("surface"). The pressure of the lowest
+PP and of ET with --et_from LH ("surface"; ET from QFX, the default, has no python
+counterpart: its reference is made with --update-reference). The pressure of the lowest
 model level is also saved (data/p_lowest_level.dat.gz), so the tests can tell
 where the ground is above an interslab level without reading NetCDF.
 
@@ -46,15 +47,15 @@ NFILES = 49           # 48 hourly files used (-rf 2 drops the last one)
 TIME_FACTOR = 3       # -tf of the original run
 
 WRF_VARS = ["P", "PB", "U", "V", "W", "T", "QVAPOR", "XLAT", "XLONG",
-            "RAINNC", "RAINC", "I_RAINNC", "I_RAINC", "LH", "T2B"]
+            "RAINNC", "RAINC", "I_RAINNC", "I_RAINC", "QFX", "LH", "T2B"]
 WRF_ATTRS = ["BUCKET_MM", "CU_PHYSICS"]
 
 # name -> number of levels (slabs or interslabs) in the reference outputs
 REF_VARS = {"PW": NSLABS, "U": NSLABS, "V": NSLABS,
             "W": NSLABS - 1, "Q": NSLABS - 1, "PWflux": NSLABS - 1, "moistdensity": NSLABS - 1}
-# outputs of the python programs (-tf 3, -ovar PP and ET), without levels
+# outputs of the python programs (-tf 3, -ovar PP and ET), without levels; reference name -> python output
 REF_SURFACE_SRC = Path("/data/keeling/a/erickkc2/scratch/2LDRM_AMZ2/01_inputs/CPM")
-REF_SURFACE_VARS = ["PP", "ET"]
+REF_SURFACE_VARS = {"PP": "PP", "ET_LH": "ET"}
 
 
 def crop_slices(dims):
@@ -101,9 +102,10 @@ def write_gz(path, array):
         f.write(np.ascontiguousarray(array, dtype="<f4").tobytes())
 
 
-def crop_reference(name, nlev, start, count, out_dir, src_dir=REF_SRC):
+def crop_reference(name, nlev, start, count, out_dir, src_dir=REF_SRC, src_name=None):
     shape = (-1, NY, NX) if nlev is None else (-1, nlev, NY, NX)
-    data = np.memmap(src_dir / f"{REF_BASENAME}_{name}.dat", dtype="<f4", mode="r").reshape(shape)
+    src = src_dir / f"{REF_BASENAME}_{src_name or name}.dat"
+    data = np.memmap(src, dtype="<f4", mode="r").reshape(shape)
     # C order (nt, nlev, ny, nx) is the Fortran order (nx, ny, nlev, nt) of the program outputs
     write_gz(out_dir / f"{name}.dat.gz", data[start:start + count, ..., J0:J0 + NYC, I0:I0 + NXC])
 
@@ -137,9 +139,9 @@ def main():
         print(f"reference {name}: steps {first // TIME_FACTOR}..{(first + nused) // TIME_FACTOR - 1}")
     # the python programs used the whole list: step n goes from file n * time factor to
     # file (n + 1) * time factor (PP) and sums its time factor files from the first (ET)
-    for name in REF_SURFACE_VARS:
+    for name, src_name in REF_SURFACE_VARS.items():
         crop_reference(name, None, first // TIME_FACTOR, nused // TIME_FACTOR, args.out_ref_surface,
-                       REF_SURFACE_SRC)
+                       REF_SURFACE_SRC, src_name)
 
 
 if __name__ == "__main__":

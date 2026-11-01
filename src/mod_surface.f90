@@ -1,7 +1,8 @@
 ! precipitation (PP) and evapotranspiration (ET) from the 2-D WRF fields, as the former
 ! python programs PP_preprocessing_2LDRM_fromRAINNC-C.py and ET_preprocessing_2LDRM.py
 ! - PP of an output step: accumulated rain at its end minus at its start
-! - ET of an output step: sum over its files of LH / Lv(T) times the seconds per file
+! - ET of an output step: sum over its files of the evapotranspiration rate times the
+!   seconds per file: QFX, or LH / Lv(T) as the python program
 ! Only 2-D arrays are used, coarsened as soon as they are read.
 module mod_surface
     use netcdf
@@ -62,31 +63,48 @@ contains
     end subroutine read_accum_rain
 
     ! adds the evapotranspiration rate (kg m-2 s-1) of an open wrfout file, coarsened, to
-    ! et_sum: LH / Lv, with Lv (J kg-1) from the temperature var_temp (Bringfelt, 1986,
-    ! Test of a forest evapotranspiration model, SMHI)
-    subroutine add_evap_rate(ncid, file, var_lh, var_temp, nx, ny, coarse_factor, et_sum, lh, temp, et_coarse)
+    ! et_sum, from (et_from):
+    ! - QFX: the surface moisture flux, the water WRF evaporates (its LH is QFX times a
+    !   constant latent heat of vaporization, 2.5104e6 J kg-1 in Noah-MP, 2.5e6 over water)
+    ! - LH: LH / Lv, with Lv (J kg-1) from the temperature var_temp (Bringfelt, 1986, Test
+    !   of a forest evapotranspiration model, SMHI), as the former python program;
+    !   2-3 % more than QFX at 296-302 K
+    subroutine add_evap_rate(ncid, file, et_from, var_qfx, var_lh, var_temp, nx, ny, coarse_factor, et_sum, &
+                             rate, temp, et_coarse)
         integer, intent(in)           :: ncid
-        character(len=*), intent(in)  :: file, var_lh, var_temp
+        character(len=*), intent(in)  :: file, et_from, var_qfx, var_lh, var_temp
         integer, intent(in)           :: nx, ny, coarse_factor
         real(8), intent(inout)        :: et_sum(nx/coarse_factor, ny/coarse_factor)
-        real(4), intent(inout)        :: lh(nx, ny), temp(nx, ny)      ! work arrays
+        real(4), intent(inout)        :: rate(nx, ny), temp(nx, ny)      ! work arrays
         real(4), intent(inout)        :: et_coarse(nx/coarse_factor, ny/coarse_factor)
-        integer                       :: varid
 
-        call nc_check(nf90_inq_varid(ncid, trim(var_lh), varid), trim(file) // ": " // trim(var_lh) // &
-                      " (use --no_pp_et to skip PP and ET)")
-        call nc_check(nf90_get_var(ncid, varid, lh, start=[1, 1, 1], count=[nx, ny, 1]), trim(file) // ": " // trim(var_lh))
-        call nc_check(nf90_inq_varid(ncid, trim(var_temp), varid), trim(file) // ": " // trim(var_temp) // &
-                      " (use --no_pp_et to skip PP and ET)")
-        call nc_check(nf90_get_var(ncid, varid, temp, start=[1, 1, 1], count=[nx, ny, 1]), &
-                      trim(file) // ": " // trim(var_temp))
-        lh = lh / (4185.5 * (751.78 - 0.5655 * temp))
+        if (et_from == "QFX") then
+            call read_2d(var_qfx, rate)
+        else
+            call read_2d(var_lh, rate)
+            call read_2d(var_temp, temp)
+            ! LH (W m-2) / Lv (J kg-1), in place
+            rate = rate / (4185.5 * (751.78 - 0.5655 * temp))
+        end if
         if (coarse_factor > 1) then
-            call coarsen_xy_grid(lh, et_coarse, nx, ny, 1, 1, coarse_factor)
+            call coarsen_xy_grid(rate, et_coarse, nx, ny, 1, 1, coarse_factor)
             et_sum = et_sum + et_coarse
         else
-            et_sum = et_sum + lh
+            et_sum = et_sum + rate
         end if
+
+    contains
+
+        subroutine read_2d(name, data)
+            character(len=*), intent(in) :: name
+            real(4), intent(out)         :: data(nx, ny)
+            integer                      :: varid
+
+            call nc_check(nf90_inq_varid(ncid, trim(name), varid), trim(file) // ": " // trim(name) // &
+                          " (use --no_pp_et to skip PP and ET)")
+            call nc_check(nf90_get_var(ncid, varid, data, start=[1, 1, 1], count=[nx, ny, 1]), &
+                          trim(file) // ": " // trim(name))
+        end subroutine read_2d
     end subroutine add_evap_rate
 
 end module mod_surface

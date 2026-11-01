@@ -74,7 +74,8 @@ program main
 
     ! precipitation (PP) and evapotranspiration (ET)
     logical                                      :: with_pp_et
-    character(len=20)                            :: vars_rain(2), vars_rain_bucket(2), var_LH, var_temp_ET
+    character(len=20)                            :: vars_rain(2), vars_rain_bucket(2), var_QFX, var_LH, var_temp_ET
+    character(len=3)                             :: et_from   ! QFX or LH
     real(4), dimension(:,:), allocatable         :: work_2d_a, work_2d_b, work_2d_coarse, data_PP_out, data_ET_out
     integer, dimension(:,:), allocatable         :: work_2d_int
     real(8), dimension(:,:), allocatable         :: et_sum, rain_start, rain_end
@@ -129,7 +130,9 @@ program main
     ! size of the BUCKET_MM attribute); missing ones count as 0
     vars_rain = [character(len=20) :: "RAINNC", "RAINC"]
     vars_rain_bucket = [character(len=20) :: "I_RAINNC", "I_RAINC"]
-    ! ET: latent heat flux (W m-2) and temperature for the latent heat of vaporization (K)
+    ! ET: surface moisture flux (kg m-2 s-1), or latent heat flux (W m-2) and temperature
+    ! for the latent heat of vaporization (K) with --et_from LH
+    var_QFX = "QFX"
     var_LH = "LH"
     var_temp_ET = "T2B"
 
@@ -268,10 +271,23 @@ program main
         help='Do not write PP and ET (for WRF files without RAINNC/RAINC, LH or T2B). &
             &PP of an output step is the accumulated rain at its end minus at its start, so it needs &
             &[n x timefactor + 1] files and --remfile 1 or 2: the removed file is used as the end (or start) &
-            &of the last (or first) step. ET is the sum over the files of a step of LH / Lv(T2B).',   &
+            &of the last (or first) step. ET is the sum over the files of a step of the evapotranspiration &
+            &rate (see --et_from).',   &
         required=.false.,   &
         act='store_true',       &
         def='.false.',          &
+        error=error_cli)
+    if (error_cli/=0) error stop
+
+    call cli%add(switch='--et_from', &
+        switch_ab='-etfrom',    &
+        help='Evapotranspiration rate used for ET. QFX: the surface moisture flux, the water WRF evaporates. &
+            &LH: LH / Lv(T2B), as the former python program; 2-3 % more than QFX, since WRF calculates LH &
+            &as QFX times a constant latent heat of vaporization.',   &
+        required=.false.,   &
+        act='store',       &
+        def="QFX",          &
+        choices="QFX,LH",  &
         error=error_cli)
     if (error_cli/=0) error stop
 
@@ -364,6 +380,8 @@ program main
     call cli%get(switch='-noppet', val=with_pp_et, error=error_cli)
     if (error_cli/=0) error stop
     with_pp_et = .not. with_pp_et
+    call cli%get(switch='-etfrom', val=et_from, error=error_cli)
+    if (error_cli/=0) error stop
     call cli%get(switch='-nsec', val=nseconds_cli, error=error_cli)
     if (error_cli/=0) error stop
     call cli%get(switch='-nx', val=nx, error=error_cli)
@@ -647,8 +665,8 @@ program main
             call nc_check(nf90_get_var(ncid,varid,data_pottemp), trim(file))                    ! from PWFLUX program
             data_pottemp = data_pottemp + base_state_pottemp                   ! from PWFLUX program
 
-            if (with_pp_et) call add_evap_rate(ncid, file, var_LH, var_temp_ET, nx, ny, coarse_factor, et_sum, &
-                                               work_2d_a, work_2d_b, work_2d_coarse)
+            if (with_pp_et) call add_evap_rate(ncid, file, et_from, var_QFX, var_LH, var_temp_ET, nx, ny, &
+                                               coarse_factor, et_sum, work_2d_a, work_2d_b, work_2d_coarse)
 
             call nc_check(nf90_close(ncid), trim(file))
 
@@ -862,6 +880,7 @@ program main
         info%time_factor = time_factor
         info%coarse_factor = coarse_factor
         info%rem_file = rem_file
+        info%et_from = trim(et_from)
         info%pressure_interslabs = pressure_interslabs
         time_start_str = ""
         if (format == "nc" .or. split /= "none") then

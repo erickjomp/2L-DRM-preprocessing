@@ -39,12 +39,11 @@ module mod_output
             "upward (Fu) if positive, downward (Fd) if negative", &
         "density of moist air at the interslab level", &
         "precipitation accumulated over the output step: RAINNC + RAINC, with the WRF buckets (P)", &
-        "evapotranspiration accumulated over the output step, from the latent heat flux LH / Lv(T2B); " // &
-            "negative values set to 0 (E)"]
+        "evapotranspiration accumulated over the output step: "]  ! + its source, see et_description
 
     ! description of the run, written as global attributes of the NetCDF files
     type :: run_info
-        character(len=:), allocatable :: list_files, split, time_units
+        character(len=:), allocatable :: list_files, split, time_units, et_from
         integer                       :: time_factor, coarse_factor, rem_file
         real(4), allocatable          :: pressure_interslabs(:)  ! Pa
         real(4), allocatable          :: lat(:,:), lon(:,:)      ! (nx, ny)
@@ -163,7 +162,12 @@ contains
                               chunksizes=[self%nx, self%ny, 1], shuffle=.true., deflate_level=1), file)
             end select
             call put_att(self%ncid, self%ids(i), "long_name", trim(var_long_names(i)))
-            call put_att(self%ncid, self%ids(i), "description", trim(var_descriptions(i)))
+            if (var_names(i) == "ET") then
+                call put_att(self%ncid, self%ids(i), "description", trim(var_descriptions(i)) // " " // &
+                             et_description(info%et_from))
+            else
+                call put_att(self%ncid, self%ids(i), "description", trim(var_descriptions(i)))
+            end if
             call put_att(self%ncid, self%ids(i), "units", trim(var_units(i)))
             call put_att(self%ncid, self%ids(i), "coordinates", coords)
             select case (var_levels(i))
@@ -187,6 +191,7 @@ contains
         call nc_check(nf90_put_att(self%ncid, nf90_global, "remfile", info%rem_file), file)
         call nc_check(nf90_put_att(self%ncid, nf90_global, "pressure_levels_Pa", info%pressure_interslabs), file)
         call put_att(self%ncid, nf90_global, "split", info%split)
+        if (self%with_pp_et) call put_att(self%ncid, nf90_global, "et_from", info%et_from)
         call date_and_time(date, clock)
         call put_att(self%ncid, nf90_global, "history", "created " // date(1:4) // "-" // date(5:6) // "-" // &
                      date(7:8) // " " // clock(1:2) // ":" // clock(3:4) // ":" // clock(5:6))
@@ -215,6 +220,17 @@ contains
             end if
         end function level_name
     end subroutine create_nc
+
+    function et_description(et_from) result(text)
+        character(len=*), intent(in)  :: et_from
+        character(len=:), allocatable :: text
+
+        if (et_from == "LH") then
+            text = "LH / Lv(T2B), with Lv = 4185.5 (751.78 - 0.5655 T2B) J kg-1; negative values set to 0 (E)"
+        else
+            text = "QFX (surface moisture flux); negative values set to 0 (E)"
+        end if
+    end function et_description
 
     subroutine put_att(ncid, varid, name, value)
         integer, intent(in)          :: ncid, varid
